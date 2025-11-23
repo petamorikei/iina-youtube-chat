@@ -1,0 +1,38 @@
+{
+  "name": "YouTube Chat",
+  "identifier": "io.github.iina.plugin.youtube-chat",
+  "version": "0.1.0",
+  "author": "IINA Community",
+  "description": "Display YouTube live chat synchronized with video playback",
+  "entry": "main.js",
+  "sidebarTab": {
+    "name": "Chat",
+    "page": "sidebar/index.html"
+  },
+  "preferences": [
+    {
+      "key": "maxMessages",
+      "type": "number",
+      "title": "Maximum messages",
+      "description": "Number of chat messages to display (0 = unlimited)",
+      "default": 50,
+      "min": 0
+    },
+    {
+      "key": "scrollDirection",
+      "type": "menu",
+      "title": "Scroll direction",
+      "options": [
+        {
+          "title": "Bottom to top",
+          "value": "bottom-to-top"
+        },
+        {
+          "title": "Top to bottom",
+          "value": "top-to-bottom"
+        }
+      ],
+      "default": "bottom-to-top"
+    }
+  ]
+}
