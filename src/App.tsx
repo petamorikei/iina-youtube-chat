@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import "./App.css";
+import { css } from "../styled-system/css";
 
 interface ChatMessage {
   id: string;
@@ -51,35 +51,151 @@ const App = () => {
   };
 
   return (
-    <div className="chat-container">
-      <div className="chat-header">
-        <h2>YouTube Chat</h2>
+    <div
+      className={css({
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        backgroundColor: "#1a1a1a",
+        color: "#ffffff",
+      })}
+    >
+      <div
+        className={css({
+          padding: "1rem",
+          borderBottom: "1px solid #333",
+          backgroundColor: "#242424",
+        })}
+      >
+        <h2
+          className={css({
+            margin: 0,
+            fontSize: "1.2rem",
+            fontWeight: 600,
+          })}
+        >
+          YouTube Chat
+        </h2>
       </div>
 
-      <div className="chat-content">
+      <div
+        className={css({
+          flex: 1,
+          overflowY: "auto",
+          padding: "1rem",
+        })}
+      >
         {state.loading && (
-          <div className="status-message loading">Loading chat data...</div>
-        )}
-
-        {state.error && (
-          <div className="status-message error">
-            <p>{state.error}</p>
-            <button onClick={handleRetry}>Retry</button>
+          <div
+            className={css({
+              padding: "1rem",
+              borderRadius: "0.5rem",
+              textAlign: "center",
+              backgroundColor: "rgba(59, 130, 246, 0.1)",
+              color: "#60a5fa",
+            })}
+          >
+            Loading chat data...
           </div>
         )}
 
-        {state.info && <div className="status-message info">{state.info}</div>}
+        {state.error && (
+          <div
+            className={css({
+              padding: "1rem",
+              borderRadius: "0.5rem",
+              textAlign: "center",
+              backgroundColor: "rgba(239, 68, 68, 0.1)",
+              color: "#f87171",
+            })}
+          >
+            <p>{state.error}</p>
+            <button
+              onClick={handleRetry}
+              className={css({
+                marginTop: "0.5rem",
+                padding: "0.5rem 1rem",
+                backgroundColor: "#dc2626",
+                color: "white",
+                border: "none",
+                borderRadius: "0.25rem",
+                cursor: "pointer",
+                _hover: {
+                  backgroundColor: "#b91c1c",
+                },
+              })}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {state.info && (
+          <div
+            className={css({
+              padding: "1rem",
+              borderRadius: "0.5rem",
+              textAlign: "center",
+              backgroundColor: "rgba(156, 163, 175, 0.1)",
+              color: "#9ca3af",
+            })}
+          >
+            {state.info}
+          </div>
+        )}
 
         {!state.loading && !state.error && !state.info && state.messages.length === 0 && (
-          <div className="status-message info">No chat messages available</div>
+          <div
+            className={css({
+              padding: "1rem",
+              borderRadius: "0.5rem",
+              textAlign: "center",
+              backgroundColor: "rgba(156, 163, 175, 0.1)",
+              color: "#9ca3af",
+            })}
+          >
+            No chat messages available
+          </div>
         )}
 
         {state.messages.length > 0 && (
-          <div className="chat-messages">
+          <div
+            className={css({
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+            })}
+          >
             {state.messages.map((msg) => (
-              <div key={msg.id} className="chat-message">
-                <span className="chat-author">{msg.author}</span>
-                <span className="chat-text">{msg.message}</span>
+              <div
+                key={msg.id}
+                className={css({
+                  display: "flex",
+                  flexDirection: "column",
+                  padding: "0.75rem",
+                  backgroundColor: "#242424",
+                  borderRadius: "0.375rem",
+                  gap: "0.25rem",
+                })}
+              >
+                <span
+                  className={css({
+                    fontWeight: 600,
+                    fontSize: "0.875rem",
+                    color: "#60a5fa",
+                  })}
+                >
+                  {msg.author}
+                </span>
+                <span
+                  className={css({
+                    fontSize: "0.875rem",
+                    lineHeight: 1.5,
+                    color: "#e5e7eb",
+                  })}
+                >
+                  {msg.message}
+                </span>
               </div>
             ))}
           </div>
