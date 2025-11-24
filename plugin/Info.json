@@ -1,38 +1,22 @@
 {
   "name": "YouTube Chat",
-  "identifier": "io.github.iina.plugin.youtube-chat",
+  "identifier": "com.petamorikei.youtube-chat",
   "version": "0.1.0",
-  "author": "IINA Community",
+  "author": {
+    "name": "petamorikei"
+  },
   "description": "Display YouTube live chat synchronized with video playback",
   "entry": "main.js",
+  "permissions": [
+    "show-osd",
+    "file-system"
+  ],
+  "allowedDomains": ["*"],
   "sidebarTab": {
-    "name": "Chat",
-    "page": "sidebar/index.html"
+    "name": "Chat"
   },
-  "preferences": [
-    {
-      "key": "maxMessages",
-      "type": "number",
-      "title": "Maximum messages",
-      "description": "Number of chat messages to display (0 = unlimited)",
-      "default": 50,
-      "min": 0
-    },
-    {
-      "key": "scrollDirection",
-      "type": "menu",
-      "title": "Scroll direction",
-      "options": [
-        {
-          "title": "Bottom to top",
-          "value": "bottom-to-top"
-        },
-        {
-          "title": "Top to bottom",
-          "value": "top-to-bottom"
-        }
-      ],
-      "default": "bottom-to-top"
-    }
-  ]
+  "preferenceDefaults": {
+    "maxMessages": 50,
+    "scrollDirection": "bottom-to-top"
+  }
 }

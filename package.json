@@ -11,7 +11,7 @@
     "build:typecheck": "tsc -b",
     "build:sidebar": "vite build",
     "build:plugin": "vite build --config vite.config.plugin.ts",
-    "build:copy-info": "cp plugin/Info.json dist/youtube-chat.iinaplugin/Info.json",
+    "build:copy-info": "cp plugin/Info.json dist/com.petamorikei.youtube-chat.iinaplugin/Info.json",
     "check": "biome check --write .",
     "preview": "vite preview",
     "preinstall": "npx only-allow pnpm",

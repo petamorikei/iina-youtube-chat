@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: "dist/youtube-chat.iinaplugin/sidebar",
+    outDir: "dist/com.petamorikei.youtube-chat.iinaplugin/sidebar",
     emptyOutDir: false,
   },
 });

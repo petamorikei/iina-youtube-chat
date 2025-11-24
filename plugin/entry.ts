@@ -120,8 +120,13 @@ const onRetryFetch = (_data: unknown): void => {
 };
 
 // Register event listeners
+event.on("iina.window-loaded", () => {
+  logger.log("Window loaded, initializing sidebar");
+  sidebar.loadFile("sidebar/index.html");
+  sidebar.onMessage("retry-fetch", onRetryFetch);
+});
+
 event.on("iina.file-loaded", (_url: string) => onFileLoaded());
 event.on("mpv.time-pos.changed", onPositionChanged);
-sidebar.onMessage("retry-fetch", onRetryFetch);
 
 logger.log("YouTube Chat plugin initialized");
