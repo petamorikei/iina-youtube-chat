@@ -1,5 +1,4 @@
 import { css } from "../styled-system/css";
-import { ChatHeader } from "./components/ChatHeader";
 import { MessageList } from "./components/MessageList";
 import { StatusMessage } from "./components/StatusMessage";
 import { useIINAMessages } from "./hooks/useIINAMessages";
@@ -17,8 +16,6 @@ const App = () => {
         color: "#ffffff",
       })}
     >
-      <ChatHeader />
-
       <div
         className={css({
           flex: 1,
