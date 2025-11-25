@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { ChatMessage as ChatMessageType } from "../types";
 import { ChatMessage } from "./ChatMessage";
 
@@ -21,28 +21,6 @@ export const MessageList = ({ messages, currentPosition }: MessageListProps) => 
     return messages.filter((msg) => msg.timestamp <= currentPosition);
   }, [messages, currentPosition]);
 
-  // Debug: Show timestamp range
-  const timestampDebug = useMemo(() => {
-    if (messages.length === 0) {
-      return { min: null, max: null, sample: [] };
-    }
-    const timestamps = messages.map((m) => m.timestamp);
-    const sample = messages.slice(0, 5).map((m) => ({ id: m.id, timestamp: m.timestamp, author: m.author }));
-    return {
-      min: Math.min(...timestamps),
-      max: Math.max(...timestamps),
-      sample,
-    };
-  }, [messages]);
-
-  console.log("[MessageList] Timestamp Analysis:", {
-    currentPosition,
-    totalMessages: messages.length,
-    filteredCount: filteredMessages.length,
-    timestampRange: `${timestampDebug.min}s - ${timestampDebug.max}s`,
-    sampleMessages: timestampDebug.sample,
-  });
-
   const virtualizer = useVirtualizer({
     count: filteredMessages.length,
     getScrollElement: () => parentRef.current,
@@ -52,22 +30,6 @@ export const MessageList = ({ messages, currentPosition }: MessageListProps) => 
   });
 
   const virtualItems = virtualizer.getVirtualItems();
-
-  console.log("[MessageList] Virtual Scrolling:", {
-    filteredCount: filteredMessages.length,
-    virtualItemsCount: virtualItems.length,
-    totalSize: virtualizer.getTotalSize(),
-  });
-
-  useEffect(() => {
-    console.log("[MessageList] Messages updated:", {
-      totalMessages: messages.length,
-      filteredMessages: filteredMessages.length,
-      virtualizedItems: virtualItems.length,
-      totalSize: virtualizer.getTotalSize(),
-      currentPosition,
-    });
-  }, [messages.length, filteredMessages.length, virtualItems.length, virtualizer, currentPosition]);
 
   // Use the official TanStack Virtual pattern for dynamic sizing
   return (
