@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Chat Preferences</title>
+  <style>
+    body {
+      padding: 12px;
+    }
+    .pref-section {
+      margin-bottom: 16px;
+    }
+    .pref-label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    .pref-input {
+      width: 100px;
+    }
+    .radio-group {
+      margin-top: 4px;
+    }
+    .radio-group label {
+      display: block;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .radio-group input[type="radio"] {
+      margin-right: 6px;
+    }
+    .checkbox-group {
+      margin-top: 4px;
+    }
+    .checkbox-group label {
+      display: block;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .checkbox-group input[type="checkbox"] {
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="pref-section">
+    <label class="pref-label">Maximum messages</label>
+    <input
+      type="number"
+      class="pref-input"
+      data-type="int"
+      data-pref-key="maxMessages"
+      min="0"
+      step="1"
+    />
+    <p class="small secondary pref-help">
+      Number of chat messages to display (0 = unlimited)
+    </p>
+  </div>
+
+  <div class="pref-section">
+    <label class="pref-label">Scroll direction</label>
+    <div class="radio-group">
+      <label>
+        <input type="radio" name="scrollDirection" value="bottom-to-top" />
+        Bottom to top (newest at bottom)
+      </label>
+      <label>
+        <input type="radio" name="scrollDirection" value="top-to-bottom" />
+        Top to bottom (newest at top)
+      </label>
+    </div>
+  </div>
+
+  <div class="pref-section">
+    <label class="pref-label">Display options</label>
+    <div class="checkbox-group">
+      <label>
+        <input type="checkbox" data-type="bool" data-pref-key="showTimestamp" />
+        Show timestamp
+      </label>
+      <label>
+        <input type="checkbox" data-type="bool" data-pref-key="showAuthorName" />
+        Show author name
+      </label>
+      <label>
+        <input type="checkbox" data-type="bool" data-pref-key="showAuthorPhoto" />
+        Show author photo
+      </label>
+    </div>
+  </div>
+</body>
+</html>

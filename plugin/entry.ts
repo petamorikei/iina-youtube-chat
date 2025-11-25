@@ -13,11 +13,30 @@ import {
 } from "./schemas";
 
 // Destructure IINA API modules
-const { event, sidebar, core, console: logger, utils, file } = iina;
+const { event, sidebar, core, console: logger, utils, file, preferences } = iina;
 
 // Plugin state
 let currentVideoUrl: string | null = null;
 let chatData: ChatMessage[] = [];
+
+/**
+ * Read current preferences and send to sidebar
+ */
+const sendPreferencesToSidebar = (): void => {
+  const maxMessages = preferences.get("maxMessages") ?? 200;
+  const scrollDirection = preferences.get("scrollDirection") ?? "bottom-to-top";
+  const showTimestamp = preferences.get("showTimestamp") ?? true;
+  const showAuthorName = preferences.get("showAuthorName") ?? true;
+  const showAuthorPhoto = preferences.get("showAuthorPhoto") ?? true;
+
+  sidebar.postMessage("preferences-update", {
+    maxMessages,
+    scrollDirection,
+    showTimestamp,
+    showAuthorName,
+    showAuthorPhoto,
+  });
+};
 
 /**
  * Check if the URL is a YouTube video
@@ -570,31 +589,26 @@ const onRetryFetch = (_data: unknown): void => {
  */
 const onSidebarReady = (_data: unknown): void => {
   logger.log("[onSidebarReady] Sidebar is ready, sending current state");
-  logger.log(`[onSidebarReady] Current state: videoUrl=${currentVideoUrl}, chatData.length=${chatData.length}`);
+
+  // Send current preferences first
+  sendPreferencesToSidebar();
 
   if (!currentVideoUrl) {
-    logger.log("[onSidebarReady] No video loaded yet");
     return;
   }
 
   if (chatData.length > 0) {
-    logger.log(`[onSidebarReady] Sending existing chat data: ${chatData.length} messages`);
     sidebar.postMessage("chat-data", { messages: chatData });
   } else {
-    logger.log("[onSidebarReady] No chat data available yet, triggering fetch");
     fetchChatData(currentVideoUrl);
   }
 };
 
 // Register event listeners
 event.on("iina.window-loaded", () => {
-  logger.log("[Plugin] Window loaded event fired");
-  logger.log("[Plugin] Loading sidebar from: sidebar/index.html");
   sidebar.loadFile("sidebar/index.html");
-  logger.log("[Plugin] Sidebar loadFile called");
   sidebar.onMessage("retry-fetch", onRetryFetch);
   sidebar.onMessage("sidebar-ready", onSidebarReady);
-  logger.log("[Plugin] Sidebar message handlers registered");
 });
 
 event.on("iina.file-loaded", (_url: string) => {
@@ -602,5 +616,3 @@ event.on("iina.file-loaded", (_url: string) => {
 });
 
 event.on("mpv.time-pos.changed", onPositionChanged);
-
-logger.log("[Plugin] YouTube Chat plugin initialized");

@@ -12,8 +12,12 @@
   "sidebarTab": {
     "name": "Chat"
   },
+  "preferencesPage": "preferences.html",
   "preferenceDefaults": {
-    "maxMessages": 50,
-    "scrollDirection": "bottom-to-top"
+    "maxMessages": 200,
+    "scrollDirection": "bottom-to-top",
+    "showTimestamp": true,
+    "showAuthorName": true,
+    "showAuthorPhoto": true
   }
 }

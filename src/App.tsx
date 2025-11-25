@@ -19,8 +19,6 @@ const App = () => {
     >
       <ChatHeader />
 
-      {/* Debug info panel - temporarily hidden */}
-
       <div
         className={css({
           flex: 1,
@@ -38,7 +36,13 @@ const App = () => {
           <StatusMessage type="info" message="No chat messages available" />
         )}
 
-        {state.messages.length > 0 && <MessageList messages={state.messages} currentPosition={state.currentPosition} />}
+        {state.messages.length > 0 && (
+          <MessageList
+            messages={state.messages}
+            currentPosition={state.currentPosition}
+            preferences={state.preferences}
+          />
+        )}
       </div>
     </div>
   );

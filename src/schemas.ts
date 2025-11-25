@@ -162,3 +162,32 @@ export const ChatInfoMessageSchema = z.object({
 export const PositionUpdateMessageSchema = z.object({
   position: z.number(),
 });
+
+/**
+ * Scroll direction type
+ */
+export const ScrollDirectionSchema = z.enum(["bottom-to-top", "top-to-bottom"]);
+
+export type ScrollDirection = z.infer<typeof ScrollDirectionSchema>;
+
+/**
+ * Schema for preferences-update message from plugin
+ */
+export const PreferencesUpdateMessageSchema = z.object({
+  maxMessages: z.number(),
+  scrollDirection: ScrollDirectionSchema,
+  showTimestamp: z.boolean(),
+  showAuthorName: z.boolean(),
+  showAuthorPhoto: z.boolean(),
+});
+
+/**
+ * User preferences type
+ */
+export interface UserPreferences {
+  maxMessages: number;
+  scrollDirection: ScrollDirection;
+  showTimestamp: boolean;
+  showAuthorName: boolean;
+  showAuthorPhoto: boolean;
+}

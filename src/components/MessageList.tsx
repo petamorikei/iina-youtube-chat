@@ -1,32 +1,46 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef } from "react";
-import type { ChatMessage as ChatMessageType } from "../types";
+import type { ChatMessage as ChatMessageType, UserPreferences } from "../types";
 import { ChatMessage } from "./ChatMessage";
 
 interface MessageListProps {
   messages: ChatMessageType[];
   currentPosition: number | null;
+  preferences: UserPreferences;
 }
 
-export const MessageList = ({ messages, currentPosition }: MessageListProps) => {
+export const MessageList = ({ messages, currentPosition, preferences }: MessageListProps) => {
   const parentRef = useRef<HTMLDivElement>(null);
+  const { maxMessages, scrollDirection } = preferences;
 
-  // Filter messages based on current position
-  const filteredMessages = useMemo(() => {
-    if (currentPosition === null) {
-      // No position info yet, show all messages
-      return messages;
+  // Filter and limit messages based on current position and preferences
+  const displayMessages = useMemo(() => {
+    // First filter by current position
+    let filtered = messages;
+    if (currentPosition !== null) {
+      filtered = messages.filter((msg) => msg.timestamp <= currentPosition);
     }
-    // Show messages up to current position
-    return messages.filter((msg) => msg.timestamp <= currentPosition);
-  }, [messages, currentPosition]);
+
+    // Apply maxMessages limit (0 = unlimited)
+    if (maxMessages > 0 && filtered.length > maxMessages) {
+      // Keep the most recent messages (last N)
+      filtered = filtered.slice(-maxMessages);
+    }
+
+    // Reverse order for top-to-bottom (newest first)
+    if (scrollDirection === "top-to-bottom") {
+      return [...filtered].reverse();
+    }
+
+    return filtered;
+  }, [messages, currentPosition, maxMessages, scrollDirection]);
 
   const virtualizer = useVirtualizer({
-    count: filteredMessages.length,
+    count: displayMessages.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 80, // Estimated height of each message
     overscan: 5, // Render 5 extra items outside viewport for smooth scrolling
-    getItemKey: (index) => filteredMessages[index]?.id ?? index, // Stable keys based on message ID
+    getItemKey: (index) => displayMessages[index]?.id ?? index, // Stable keys based on message ID
   });
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -62,7 +76,7 @@ export const MessageList = ({ messages, currentPosition }: MessageListProps) => 
         >
           {/* Items flow normally inside the wrapper */}
           {virtualItems.map((virtualItem) => {
-            const message = filteredMessages[virtualItem.index];
+            const message = displayMessages[virtualItem.index];
             return (
               <div
                 key={virtualItem.key}
@@ -71,7 +85,7 @@ export const MessageList = ({ messages, currentPosition }: MessageListProps) => 
                 style={{ paddingBottom: "0.5rem" }}
               >
                 {message ? (
-                  <ChatMessage message={message} />
+                  <ChatMessage message={message} preferences={preferences} />
                 ) : (
                   <div style={{ color: "red", fontSize: "12px", padding: "0.5rem" }}>
                     ERROR: Message at index {virtualItem.index} is undefined

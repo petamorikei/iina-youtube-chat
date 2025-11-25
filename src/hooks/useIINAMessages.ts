@@ -6,8 +6,17 @@ import {
   ChatInfoMessageSchema,
   ChatLoadingMessageSchema,
   PositionUpdateMessageSchema,
+  PreferencesUpdateMessageSchema,
 } from "../schemas";
 import type { AppState, ChatMessage } from "../types";
+
+const DEFAULT_PREFERENCES = {
+  maxMessages: 200,
+  scrollDirection: "bottom-to-top" as const,
+  showTimestamp: true,
+  showAuthorName: true,
+  showAuthorPhoto: true,
+};
 
 export const useIINAMessages = () => {
   const [state, setState] = useState<AppState>({
@@ -16,6 +25,7 @@ export const useIINAMessages = () => {
     info: null,
     messages: [],
     currentPosition: null,
+    preferences: DEFAULT_PREFERENCES,
   });
 
   // Store chunks temporarily until all are received
@@ -119,6 +129,19 @@ export const useIINAMessages = () => {
       }
       const { position } = parseResult.data;
       setState((prev) => ({ ...prev, currentPosition: position }));
+    });
+
+    iina.onMessage("preferences-update", (data: unknown) => {
+      const parseResult = PreferencesUpdateMessageSchema.safeParse(data);
+      if (!parseResult.success) {
+        console.error("[useIINAMessages] Invalid preferences-update message:", parseResult.error);
+        return;
+      }
+      const { maxMessages, scrollDirection, showTimestamp, showAuthorName, showAuthorPhoto } = parseResult.data;
+      setState((prev) => ({
+        ...prev,
+        preferences: { maxMessages, scrollDirection, showTimestamp, showAuthorName, showAuthorPhoto },
+      }));
     });
 
     // Send ready signal to plugin to request current data

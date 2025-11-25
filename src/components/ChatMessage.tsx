@@ -1,8 +1,9 @@
 import { css } from "../../styled-system/css";
-import type { AuthorBadge, ChatMessage as ChatMessageType, MessageRun } from "../types";
+import type { AuthorBadge, ChatMessage as ChatMessageType, MessageRun, UserPreferences } from "../types";
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  preferences: UserPreferences;
 }
 
 // Badge icons as SVG components
@@ -180,9 +181,10 @@ const getMessageStyle = (message: ChatMessageType) => {
   }
 };
 
-export const ChatMessage = ({ message }: ChatMessageProps) => {
+export const ChatMessage = ({ message, preferences }: ChatMessageProps) => {
   const style = getMessageStyle(message);
   const isSpecialMessage = ["superchat", "supersticker", "membership", "gift"].includes(message.type);
+  const { showTimestamp, showAuthorName, showAuthorPhoto } = preferences;
 
   return (
     <div
@@ -217,35 +219,36 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
         })}
       >
         {/* Avatar */}
-        {message.authorPhoto ? (
-          <img
-            src={message.authorPhoto}
-            alt={message.author}
-            className={css({
-              width: "32px",
-              height: "32px",
-              borderRadius: "50%",
-              flexShrink: 0,
-            })}
-          />
-        ) : (
-          <div
-            className={css({
-              width: "32px",
-              height: "32px",
-              borderRadius: "50%",
-              backgroundColor: "#444444",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "0.75rem",
-              color: "#888888",
-            })}
-          >
-            {message.author.charAt(0).toUpperCase()}
-          </div>
-        )}
+        {showAuthorPhoto &&
+          (message.authorPhoto ? (
+            <img
+              src={message.authorPhoto}
+              alt={message.author}
+              className={css({
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                flexShrink: 0,
+              })}
+            />
+          ) : (
+            <div
+              className={css({
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                backgroundColor: "#444444",
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "0.75rem",
+                color: "#888888",
+              })}
+            >
+              {message.author.charAt(0).toUpperCase()}
+            </div>
+          ))}
 
         {/* Message body */}
         <div
@@ -258,36 +261,42 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
           })}
         >
           {/* Author line */}
-          <div
-            className={css({
-              display: "flex",
-              alignItems: "center",
-              gap: "0.25rem",
-              flexWrap: "wrap",
-            })}
-          >
-            <span
+          {(showAuthorName || showTimestamp) && (
+            <div
               className={css({
-                fontWeight: 600,
-                fontSize: "0.8125rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.25rem",
+                flexWrap: "wrap",
               })}
-              style={{ color: style.authorColor }}
             >
-              {message.author}
-            </span>
-            <AuthorBadges badges={message.authorBadges} />
-            {message.timestampText && (
-              <span
-                className={css({
-                  fontSize: "0.6875rem",
-                  color: "#888888",
-                  marginLeft: "auto",
-                })}
-              >
-                {message.timestampText}
-              </span>
-            )}
-          </div>
+              {showAuthorName && (
+                <>
+                  <span
+                    className={css({
+                      fontWeight: 600,
+                      fontSize: "0.8125rem",
+                    })}
+                    style={{ color: style.authorColor }}
+                  >
+                    {message.author}
+                  </span>
+                  <AuthorBadges badges={message.authorBadges} />
+                </>
+              )}
+              {showTimestamp && message.timestampText && (
+                <span
+                  className={css({
+                    fontSize: "0.6875rem",
+                    color: "#888888",
+                    marginLeft: showAuthorName ? "auto" : undefined,
+                  })}
+                >
+                  {message.timestampText}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Message text */}
           {message.type !== "supersticker" && (

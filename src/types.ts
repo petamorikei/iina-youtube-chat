@@ -5,10 +5,22 @@ import type {
   MessageEmoji,
   MessageRun,
   MessageType,
+  ScrollDirection,
   SuperChatColors,
+  UserPreferences,
 } from "./schemas";
 
-export type { AuthorBadge, BadgeType, ChatMessage, MessageEmoji, MessageRun, MessageType, SuperChatColors };
+export type {
+  AuthorBadge,
+  BadgeType,
+  ChatMessage,
+  MessageEmoji,
+  MessageRun,
+  MessageType,
+  ScrollDirection,
+  SuperChatColors,
+  UserPreferences,
+};
 
 export interface AppState {
   loading: boolean;
@@ -16,6 +28,7 @@ export interface AppState {
   info: string | null;
   messages: ChatMessage[];
   currentPosition: number | null;
+  preferences: UserPreferences;
 }
 
 export type StatusMessageType = "loading" | "error" | "info";
