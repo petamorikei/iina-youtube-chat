@@ -8,7 +8,8 @@ interface IINAWebViewAPI {
   postMessage(name: string, data: unknown): void;
 
   /**
-   * Register a listener for messages from the plugin entry point
+   * Register a message handler for a specific message type
+   * Multiple handlers can be registered for different message types
    */
   onMessage(name: string, callback: (data: unknown) => void): void;
 }

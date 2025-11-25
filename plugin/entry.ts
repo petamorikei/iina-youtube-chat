@@ -1,12 +1,23 @@
 // IINA Plugin Entry Point for YouTube Chat
 // This file runs in IINA's JavaScriptCore context
 
+import {
+  type AuthorBadge,
+  type BadgeType,
+  type ChatMessage,
+  ChatMessageSchema,
+  LiveChatLineSchema,
+  type MessageRun,
+  type MessageType,
+  type SuperChatColors,
+} from "./schemas";
+
 // Destructure IINA API modules
-const { event, sidebar, core, console: logger } = iina;
+const { event, sidebar, core, console: logger, utils, file } = iina;
 
 // Plugin state
 let currentVideoUrl: string | null = null;
-let chatData: unknown[] = [];
+let chatData: ChatMessage[] = [];
 
 /**
  * Check if the URL is a YouTube video
@@ -19,11 +30,7 @@ const isYouTubeUrl = (url: string): boolean => {
  * Extract video ID from YouTube URL
  */
 const extractVideoId = (url: string): string | null => {
-  const patterns = [
-    /youtube\.com\/watch\?v=([^&]+)/,
-    /youtu\.be\/([^?]+)/,
-    /youtube\.com\/embed\/([^?]+)/,
-  ];
+  const patterns = [/youtube\.com\/watch\?v=([^&]+)/, /youtu\.be\/([^?]+)/, /youtube\.com\/embed\/([^?]+)/];
 
   for (const pattern of patterns) {
     const match = url.match(pattern);
@@ -34,23 +41,466 @@ const extractVideoId = (url: string): string | null => {
   return null;
 };
 
+// ============================================================
+// Parser Helper Functions
+// ============================================================
+
+interface YTMessageRun {
+  text?: string;
+  emoji?: {
+    emojiId?: string;
+    shortcuts?: string[];
+    image?: { thumbnails: Array<{ url: string; width?: number; height?: number }> };
+    isCustomEmoji?: boolean;
+  };
+}
+
+interface YTAuthorBadge {
+  liveChatAuthorBadgeRenderer: {
+    icon?: { iconType: string };
+    tooltip?: string;
+    customThumbnail?: { thumbnails: Array<{ url: string }> };
+  };
+}
+
+interface YTThumbnails {
+  thumbnails: Array<{ url: string; width?: number; height?: number }>;
+}
+
+/**
+ * Convert YouTube color number to CSS hex string
+ */
+const colorToHex = (colorNum: number | undefined): string | undefined => {
+  if (colorNum === undefined) return undefined;
+  // YouTube colors are ARGB format as signed 32-bit integers
+  const unsigned = colorNum >>> 0;
+  const hex = unsigned.toString(16).padStart(8, "0");
+  // Convert ARGB to RGBA CSS format
+  const a = hex.slice(0, 2);
+  const rgb = hex.slice(2);
+  return `#${rgb}${a}`;
+};
+
+/**
+ * Get the best thumbnail URL (prefer larger size)
+ */
+const getBestThumbnail = (thumbnails: YTThumbnails | undefined): string | undefined => {
+  if (!thumbnails?.thumbnails?.length) return undefined;
+  // Sort by width descending, prefer 64x64
+  const sorted = [...thumbnails.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
+  return sorted[0]?.url;
+};
+
+/**
+ * Parse author badges from YouTube format
+ */
+const parseAuthorBadges = (badges: YTAuthorBadge[] | undefined): AuthorBadge[] | undefined => {
+  if (!badges?.length) return undefined;
+
+  const result: AuthorBadge[] = [];
+
+  for (const badge of badges) {
+    const renderer = badge.liveChatAuthorBadgeRenderer;
+    const iconType = renderer.icon?.iconType?.toLowerCase();
+    const tooltip = renderer.tooltip || "";
+
+    let badgeType: BadgeType | undefined;
+
+    if (iconType === "verified") {
+      badgeType = "verified";
+    } else if (iconType === "owner") {
+      badgeType = "owner";
+    } else if (iconType === "moderator") {
+      badgeType = "moderator";
+    } else if (iconType === "member" || renderer.customThumbnail) {
+      badgeType = "member";
+    }
+
+    if (badgeType) {
+      result.push({
+        type: badgeType,
+        label: tooltip,
+        customIcon: getBestThumbnail(renderer.customThumbnail),
+      });
+    }
+  }
+
+  return result.length > 0 ? result : undefined;
+};
+
+/**
+ * Parse message runs from YouTube format to our format
+ */
+const parseMessageRuns = (runs: YTMessageRun[] | undefined): { text: string; messageRuns: MessageRun[] } => {
+  if (!runs?.length) {
+    return { text: "", messageRuns: [] };
+  }
+
+  const messageRuns: MessageRun[] = [];
+  let plainText = "";
+
+  for (const run of runs) {
+    if (run.text) {
+      plainText += run.text;
+      messageRuns.push({
+        type: "text",
+        text: run.text,
+      });
+    } else if (run.emoji) {
+      const emojiId = run.emoji.emojiId || "";
+      const shortcut = run.emoji.shortcuts?.[0];
+      const imageUrl = run.emoji.image?.thumbnails?.[0]?.url;
+      const isCustom = run.emoji.isCustomEmoji;
+
+      // For plain text, prefer shortcut, then emojiId
+      plainText += shortcut || emojiId;
+
+      messageRuns.push({
+        type: "emoji",
+        emoji: {
+          emojiId,
+          shortcut,
+          imageUrl,
+          isCustom,
+        },
+      });
+    }
+  }
+
+  return { text: plainText, messageRuns };
+};
+
+/**
+ * Parse Super Chat colors
+ */
+const parseSuperChatColors = (renderer: {
+  headerBackgroundColor?: number;
+  headerTextColor?: number;
+  bodyBackgroundColor?: number;
+  bodyTextColor?: number;
+  authorNameTextColor?: number;
+}): SuperChatColors | undefined => {
+  const colors: SuperChatColors = {
+    headerBackgroundColor: colorToHex(renderer.headerBackgroundColor),
+    headerTextColor: colorToHex(renderer.headerTextColor),
+    bodyBackgroundColor: colorToHex(renderer.bodyBackgroundColor),
+    bodyTextColor: colorToHex(renderer.bodyTextColor),
+    authorNameTextColor: colorToHex(renderer.authorNameTextColor),
+  };
+
+  // Return undefined if no colors are set
+  const hasColors = Object.values(colors).some((c) => c !== undefined);
+  return hasColors ? colors : undefined;
+};
+
+// ============================================================
+// Main Parser
+// ============================================================
+
+/**
+ * Parse chat data from live_chat.json format using Zod schemas
+ */
+const parseChatData = (fileContent: string): ChatMessage[] => {
+  const messages: ChatMessage[] = [];
+  const lines = fileContent.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) {
+      continue;
+    }
+
+    try {
+      const jsonData = JSON.parse(line);
+      const parseResult = LiveChatLineSchema.safeParse(jsonData);
+
+      if (!parseResult.success) {
+        // Only log every 100th failure to avoid spam
+        if (i % 100 === 0) {
+          logger.warn(`[parseChatData] Schema validation failed for line ${i + 1}`);
+        }
+        continue;
+      }
+
+      const entry = parseResult.data;
+      const replayAction = entry.replayChatItemAction;
+
+      if (!replayAction?.actions) {
+        continue;
+      }
+
+      const timestamp = replayAction.videoOffsetTimeMsec
+        ? Number(replayAction.videoOffsetTimeMsec) / 1000 // Convert ms to seconds
+        : 0;
+
+      for (const action of replayAction.actions) {
+        const item = action.addChatItemAction?.item;
+        if (!item) continue;
+
+        let chatMessage: ChatMessage | null = null;
+
+        // Handle regular text messages
+        if (item.liveChatTextMessageRenderer) {
+          const r = item.liveChatTextMessageRenderer;
+          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
+
+          if (text || messageRuns.length > 0) {
+            chatMessage = {
+              id: r.id || `${timestamp}-${messages.length}`,
+              type: "text" as MessageType,
+              timestamp,
+              author: r.authorName?.simpleText || "Unknown",
+              authorPhoto: getBestThumbnail(r.authorPhoto),
+              authorChannelId: r.authorExternalChannelId,
+              authorBadges: parseAuthorBadges(r.authorBadges),
+              message: text,
+              messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+              timestampText: r.timestampText?.simpleText,
+            };
+          }
+        }
+
+        // Handle Super Chat (paid messages)
+        if (item.liveChatPaidMessageRenderer) {
+          const r = item.liveChatPaidMessageRenderer;
+          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
+
+          chatMessage = {
+            id: r.id || `${timestamp}-${messages.length}`,
+            type: "superchat" as MessageType,
+            timestamp,
+            author: r.authorName?.simpleText || "Unknown",
+            authorPhoto: getBestThumbnail(r.authorPhoto),
+            authorChannelId: r.authorExternalChannelId,
+            authorBadges: parseAuthorBadges(r.authorBadges),
+            message: text || "(Super Chat)",
+            messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+            timestampText: r.timestampText?.simpleText,
+            amount: r.purchaseAmountText?.simpleText,
+            colors: parseSuperChatColors(r),
+          };
+        }
+
+        // Handle Super Sticker
+        if (item.liveChatPaidStickerRenderer) {
+          const r = item.liveChatPaidStickerRenderer;
+
+          chatMessage = {
+            id: r.id || `${timestamp}-${messages.length}`,
+            type: "supersticker" as MessageType,
+            timestamp,
+            author: r.authorName?.simpleText || "Unknown",
+            authorPhoto: getBestThumbnail(r.authorPhoto),
+            authorChannelId: r.authorExternalChannelId,
+            authorBadges: parseAuthorBadges(r.authorBadges),
+            message: "(Super Sticker)",
+            timestampText: r.timestampText?.simpleText,
+            amount: r.purchaseAmountText?.simpleText,
+            stickerUrl: getBestThumbnail(r.sticker),
+            colors: {
+              bodyBackgroundColor: colorToHex(r.backgroundColor),
+              authorNameTextColor: colorToHex(r.authorNameTextColor),
+            },
+          };
+        }
+
+        // Handle Membership events
+        if (item.liveChatMembershipItemRenderer) {
+          const r = item.liveChatMembershipItemRenderer;
+          const { text: headerText } = parseMessageRuns(r.headerSubtext?.runs);
+          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
+
+          chatMessage = {
+            id: r.id || `${timestamp}-${messages.length}`,
+            type: "membership" as MessageType,
+            timestamp,
+            author: r.authorName?.simpleText || "Unknown",
+            authorPhoto: getBestThumbnail(r.authorPhoto),
+            authorChannelId: r.authorExternalChannelId,
+            authorBadges: parseAuthorBadges(r.authorBadges),
+            message: text || headerText || "(New Member)",
+            messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+            timestampText: r.timestampText?.simpleText,
+            membershipLevel: headerText || undefined,
+          };
+        }
+
+        // Handle Gift Membership
+        if (item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer) {
+          const r = item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer;
+          const { text: giftText } = parseMessageRuns(r.header?.liveChatSponsorshipsHeaderRenderer?.primaryText?.runs);
+
+          chatMessage = {
+            id: r.id || `${timestamp}-${messages.length}`,
+            type: "gift" as MessageType,
+            timestamp,
+            author: r.authorName?.simpleText || "Unknown",
+            authorPhoto: getBestThumbnail(r.authorPhoto),
+            authorChannelId: r.authorExternalChannelId,
+            message: giftText || "(Gift Membership)",
+          };
+        }
+
+        // Handle System/Engagement messages
+        if (item.liveChatViewerEngagementMessageRenderer) {
+          const r = item.liveChatViewerEngagementMessageRenderer;
+          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
+
+          if (text) {
+            chatMessage = {
+              id: r.id || `${timestamp}-${messages.length}`,
+              type: "system" as MessageType,
+              timestamp,
+              author: "YouTube",
+              message: text,
+              messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+            };
+          }
+        }
+
+        // Validate and add message
+        if (chatMessage) {
+          const validationResult = ChatMessageSchema.safeParse(chatMessage);
+          if (validationResult.success) {
+            messages.push(validationResult.data);
+          } else {
+            logger.warn(`[parseChatData] Invalid message structure at line ${i + 1}`);
+          }
+        }
+      }
+    } catch (error) {
+      // Only log every 100th error to avoid spam
+      if (i % 100 === 0) {
+        logger.warn(`[parseChatData] Failed to parse line ${i + 1}: ${error}`);
+      }
+    }
+  }
+
+  logger.log(`[parseChatData] Parsed ${messages.length} messages`);
+  return messages;
+};
+
 /**
  * Fetch chat data using yt-dlp
  */
 const fetchChatData = async (videoUrl: string): Promise<void> => {
+  logger.log(`[fetchChatData] Fetching chat data for: ${videoUrl}`);
   try {
+    logger.log("[fetchChatData] Sending chat-loading(true) message");
     sidebar.postMessage("chat-loading", { loading: true });
+    logger.log("[fetchChatData] chat-loading(true) message sent");
 
-    // TODO: Execute yt-dlp and fetch chat data
-    // This will be implemented in the next phase
-    logger.log(`Fetching chat data for: ${videoUrl}`);
+    // Find yt-dlp executable path
+    // The PATH environment in JavaScriptCore might differ from the user's shell,
+    // so we check common installation locations first.
+    const commonPaths = [
+      "/opt/homebrew/bin/yt-dlp", // macOS Apple Silicon (Homebrew)
+      "/usr/local/bin/yt-dlp", // macOS Intel (Homebrew) / Linux
+      "/usr/bin/yt-dlp", // Linux system package
+    ];
 
-    // Placeholder: Send empty chat data for now
-    chatData = [];
-    sidebar.postMessage("chat-data", { messages: chatData });
+    let ytdlpPath = "yt-dlp"; // Fallback to PATH lookup
+    for (const path of commonPaths) {
+      if (utils.fileInPath(path)) {
+        ytdlpPath = path;
+        logger.log(`[fetchChatData] Using yt-dlp: ${ytdlpPath}`);
+        break;
+      }
+    }
+
+    // Extract video ID for output filename
+    const videoId = extractVideoId(videoUrl);
+    if (!videoId) {
+      throw new Error("Could not extract video ID");
+    }
+
+    // Set output template and working directory
+    // Use /tmp for yt-dlp output and IINA file API access
+    const tmpDir = "/tmp";
+    const outputTemplate = `${tmpDir}/iina-youtube-chat-${videoId}`;
+
+    // Chat file path - using system path directly
+    const chatFilePath = `${outputTemplate}.live_chat.json`;
+
+    // Execute yt-dlp to download live chat
+    const result = await utils.exec(
+      ytdlpPath,
+      [
+        "--write-subs",
+        "--sub-lang",
+        "live_chat",
+        "--skip-download",
+        "--extractor-args",
+        "youtube:player_client=default",
+        "-o",
+        outputTemplate,
+        videoUrl,
+      ],
+      tmpDir,
+      (_data: string) => {
+        // Disabled: yt-dlp output logging causes UI thread to become heavy
+        // logger.log(`[DEBUG yt-dlp stdout] ${data}`);
+      },
+      (_data: string) => {
+        // Disabled: yt-dlp output logging causes UI thread to become heavy
+        // logger.log(`[DEBUG yt-dlp stderr] ${data}`);
+      },
+    );
+
+    if (result.status !== 0) {
+      throw new Error(`yt-dlp failed with status ${result.status}: ${result.stderr}`);
+    }
+
+    // Check if file exists
+    if (!file.exists(chatFilePath)) {
+      throw new Error(`Chat file not found: ${chatFilePath}`);
+    }
+
+    // Read and parse chat data
+    const chatFileContent = file.read(chatFilePath);
+    if (!chatFileContent) {
+      throw new Error("Failed to read chat file");
+    }
+
+    chatData = parseChatData(chatFileContent);
+    logger.log(`[fetchChatData] Successfully parsed ${chatData.length} chat messages`);
+
+    // Note: Temporary files in /tmp are left for OS to clean up
+
+    logger.log(`[fetchChatData] Sending chat data in chunks (${chatData.length} total messages)`);
+
+    // Split data into chunks to avoid message size limit
+    const CHUNK_SIZE = 100;
+    const totalChunks = Math.ceil(chatData.length / CHUNK_SIZE);
+
+    logger.log(`[fetchChatData] Total chunks: ${totalChunks}, chunk size: ${CHUNK_SIZE}`);
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, chatData.length);
+      const chunk = chatData.slice(start, end);
+
+      sidebar.postMessage("chat-data-chunk", {
+        chunk,
+        chunkIndex: i,
+        totalChunks,
+        start,
+        end,
+      });
+
+      if ((i + 1) % 10 === 0 || i === totalChunks - 1) {
+        logger.log(`[fetchChatData] Sent chunk ${i + 1}/${totalChunks} (${start}-${end})`);
+      }
+    }
+
+    // Send completion message
+    sidebar.postMessage("chat-data-complete", { totalMessages: chatData.length });
+    logger.log(`[fetchChatData] All chunks sent successfully (${totalChunks} chunks, ${chatData.length} messages)`);
+
     sidebar.postMessage("chat-loading", { loading: false });
+    logger.log("[fetchChatData] chat-loading(false) message sent successfully");
   } catch (error) {
-    logger.error(`Error fetching chat data: ${error}`);
+    logger.error(`[fetchChatData] ERROR: ${error}`);
     sidebar.postMessage("chat-error", {
       message: "Failed to fetch chat data",
       error: String(error),
@@ -66,14 +516,10 @@ const onFileLoaded = (): void => {
   const url = core.status.url;
 
   if (!url) {
-    logger.log("No URL available");
     return;
   }
 
-  logger.log(`File loaded: ${url}`);
-
   if (!isYouTubeUrl(url)) {
-    logger.log("Not a YouTube URL");
     sidebar.postMessage("chat-info", {
       message: "This is not a YouTube video",
     });
@@ -82,14 +528,13 @@ const onFileLoaded = (): void => {
 
   const videoId = extractVideoId(url);
   if (!videoId) {
-    logger.log("Could not extract video ID");
     sidebar.postMessage("chat-error", {
       message: "Could not extract YouTube video ID",
     });
     return;
   }
 
-  logger.log(`YouTube video detected: ${videoId}`);
+  logger.log(`[onFileLoaded] YouTube video detected: ${videoId}`);
   currentVideoUrl = url;
 
   // Fetch chat data
@@ -105,28 +550,57 @@ const onPositionChanged = (): void => {
     return;
   }
 
-  // TODO: Filter and send messages based on current position
-  // This will be implemented in the next phase
-  logger.log(`Position changed: ${position}`);
+  // Send current position to sidebar for timestamp-based filtering
+  sidebar.postMessage("position-update", { position });
 };
 
 /**
  * Handle retry-fetch message from sidebar
  */
 const onRetryFetch = (_data: unknown): void => {
+  logger.log("[onRetryFetch] Received retry-fetch message");
   if (currentVideoUrl) {
+    fetchChatData(currentVideoUrl);
+  }
+};
+
+/**
+ * Handle sidebar-ready message from sidebar
+ * Send current state when sidebar is ready
+ */
+const onSidebarReady = (_data: unknown): void => {
+  logger.log("[onSidebarReady] Sidebar is ready, sending current state");
+  logger.log(`[onSidebarReady] Current state: videoUrl=${currentVideoUrl}, chatData.length=${chatData.length}`);
+
+  if (!currentVideoUrl) {
+    logger.log("[onSidebarReady] No video loaded yet");
+    return;
+  }
+
+  if (chatData.length > 0) {
+    logger.log(`[onSidebarReady] Sending existing chat data: ${chatData.length} messages`);
+    sidebar.postMessage("chat-data", { messages: chatData });
+  } else {
+    logger.log("[onSidebarReady] No chat data available yet, triggering fetch");
     fetchChatData(currentVideoUrl);
   }
 };
 
 // Register event listeners
 event.on("iina.window-loaded", () => {
-  logger.log("Window loaded, initializing sidebar");
+  logger.log("[Plugin] Window loaded event fired");
+  logger.log("[Plugin] Loading sidebar from: sidebar/index.html");
   sidebar.loadFile("sidebar/index.html");
+  logger.log("[Plugin] Sidebar loadFile called");
   sidebar.onMessage("retry-fetch", onRetryFetch);
+  sidebar.onMessage("sidebar-ready", onSidebarReady);
+  logger.log("[Plugin] Sidebar message handlers registered");
 });
 
-event.on("iina.file-loaded", (_url: string) => onFileLoaded());
+event.on("iina.file-loaded", (_url: string) => {
+  onFileLoaded();
+});
+
 event.on("mpv.time-pos.changed", onPositionChanged);
 
-logger.log("YouTube Chat plugin initialized");
+logger.log("[Plugin] YouTube Chat plugin initialized");
