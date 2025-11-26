@@ -9,8 +9,7 @@
   },
   "description": "Display YouTube live chat synchronized with video playback",
   "entry": "dist/main.js",
-  "permissions": ["file-system", "network-request"],
-  "allowedDomains": ["*"],
+  "permissions": ["file-system"],
   "sidebarTab": {
     "name": "Chat"
   },
