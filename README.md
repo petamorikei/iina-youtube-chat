@@ -148,17 +148,17 @@ pnpm check
 
 ```bash
 # Symlink plugin to IINA
-iina-plugin link dist/io.github.petamorikei.iina-youtube-chat.iinaplugin
+iina-plugin link dist/com.petamorikei.iina-youtube-chat.iinaplugin
 
 # Unlink
-iina-plugin unlink dist/io.github.petamorikei.iina-youtube-chat.iinaplugin
+iina-plugin unlink dist/com.petamorikei.iina-youtube-chat.iinaplugin
 ```
 
 ### Packaging
 
 ```bash
 # Generate .iinaplgz file
-iina-plugin pack dist/io.github.petamorikei.iina-youtube-chat.iinaplugin
+iina-plugin pack dist/com.petamorikei.iina-youtube-chat.iinaplugin
 ```
 
 ## License

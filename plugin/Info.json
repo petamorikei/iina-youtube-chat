@@ -1,6 +1,6 @@
 {
   "name": "iina-youtube-chat",
-  "identifier": "io.github.petamorikei.iina-youtube-chat",
+  "identifier": "com.petamorikei.iina-youtube-chat",
   "version": "0.1.0",
   "ghRepo": "petamorikei/iina-youtube-chat",
   "ghVersion": 1,

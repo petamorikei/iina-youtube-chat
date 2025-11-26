@@ -9,7 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist/*
-!dist/io.github.petamorikei.iina-youtube-chat.iinaplugin/
+!dist/com.petamorikei.iina-youtube-chat.iinaplugin/
 dist-ssr
 *.local
 
