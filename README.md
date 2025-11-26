@@ -1,73 +1,163 @@
-# React + TypeScript + Vite
+# IINA YouTube Chat
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Display YouTube live chat and archived stream chat synchronized with video playback in IINA.
 
-Currently, two official plugins are available:
+![IINA](https://img.shields.io/badge/IINA-1.4.0+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
 
-## React Compiler
+- **Live Streams**: Fetch and display chat in real-time
+- **Archived Streams**: Sync chat with video playback position
+- **Rich Display**: Support for Super Chat, memberships, emojis, and more
+- **Customizable**: Configure scroll direction, message limit, and display options
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+## Installation
 
-## Expanding the ESLint configuration
+### Requirements
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- [IINA](https://iina.io/) 1.4.0 or later
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (required for archived stream chat)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Installing yt-dlp
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Homebrew (macOS)
+brew install yt-dlp
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Installing the Plugin
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+1. Open IINA
+1. Go to **Settings** → **Plugins**
+1. Select **"Install from GitHub..."**
+1. Enter `petamorikei/iina-youtube-chat` and click **Install**
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Usage
+
+Open a YouTube video in IINA, then display chat using one of the following methods:
+
+### Option 1: Sidebar
+
+1. Click the sidebar toggle button
+1. Select the **"Chat"** tab
+1. Chat will be automatically loaded and displayed
+
+### Option 2: Standalone Window
+
+1. Go to **Plugin** menu → **iina-youtube-chat** → **Open Chat Window**
+1. A separate chat window will open
+
+The standalone window is useful when you want to keep chat visible while hiding the sidebar, or position it anywhere on your screen.
+
+### Live Streams
+
+- Chat updates in real-time
+- Auto-scrolls to new messages when scrolled to the bottom (or top, depending on settings)
+
+### Archived Streams
+
+- Chat syncs with video seeking (fast-forward/rewind)
+- Supports playback speed changes
+
+## Settings
+
+Configure via IINA Settings → Plugins → iina-youtube-chat
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Maximum messages | Max number of messages to display (0 = unlimited) | 200 |
+| Scroll direction | Chat scroll direction | Bottom to top |
+| Show timestamp | Display message timestamps | ON |
+| Show author name | Display author names | ON |
+| Show author photo | Display author profile photos | ON |
+
+## Supported Message Types
+
+- Regular text messages
+- Super Chat (displayed with colors)
+- Super Stickers
+- Membership notifications
+- Gift memberships
+- System messages
+
+## Troubleshooting
+
+### Chat not displaying
+
+- **For archived streams**: Make sure yt-dlp is installed
+- **For live streams**: Verify that chat is enabled for the stream
+- Regular videos (non-livestreams) do not have chat
+
+### "yt-dlp not found" error
+
+yt-dlp is not installed or not in the system PATH. Install it with:
+
+```bash
+brew install yt-dlp
 ```
+
+---
+
+## For Developers
+
+### Tech Stack
+
+- **React 19** + **TypeScript 5.9**
+- **Vite** (rolldown-vite) - Build tool
+- **Panda CSS** - Styling
+- **TanStack Virtual** - Virtual scrolling
+- **Zod** - Schema validation
+- **Biome** - Formatter/Linter
+
+### Setup
+
+```bash
+# Install dependencies
+pnpm install
+
+# Start development server
+pnpm dev
+
+# Build
+pnpm build
+
+# Code quality check
+pnpm check
+```
+
+### Project Structure
+
+```
+├── plugin/           # IINA plugin entry point
+│   ├── entry.ts      # Main entry
+│   ├── live-chat-fetcher.ts  # Live chat fetching
+│   ├── schemas.ts    # Zod schema definitions
+│   └── Info.json     # Plugin metadata
+├── src/              # React sidebar UI
+│   ├── App.tsx
+│   ├── components/
+│   └── hooks/
+└── dist/             # Build output
+```
+
+### Development Plugin Linking
+
+```bash
+# Symlink plugin to IINA
+iina-plugin link dist/io.github.petamorikei.iina-youtube-chat.iinaplugin
+
+# Unlink
+iina-plugin unlink dist/io.github.petamorikei.iina-youtube-chat.iinaplugin
+```
+
+### Packaging
+
+```bash
+# Generate .iinaplgz file
+iina-plugin pack dist/io.github.petamorikei.iina-youtube-chat.iinaplugin
+```
+
+## License
+
+MIT License
