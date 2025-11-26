@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage as ChatMessageType, UserPreferences } from "../types";
 import { ChatMessage } from "./ChatMessage";
 
@@ -12,6 +12,10 @@ interface MessageListProps {
 export const MessageList = ({ messages, currentPosition, preferences }: MessageListProps) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const { maxMessages, scrollDirection } = preferences;
+
+  // Track if user is at the bottom (should auto-scroll)
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const prevMessageCountRef = useRef(0);
 
   // Filter and limit messages based on current position and preferences
   const displayMessages = useMemo(() => {
@@ -43,59 +47,139 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
     getItemKey: (index) => displayMessages[index]?.id ?? index, // Stable keys based on message ID
   });
 
+  // Check if scrolled to bottom (within threshold)
+  const checkIfAtBottom = useCallback(() => {
+    const el = parentRef.current;
+    if (!el) return true;
+    const threshold = 50; // pixels from bottom to consider "at bottom"
+    const isBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+    return isBottom;
+  }, []);
+
+  // Handle scroll events to track if user is at bottom
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      setIsAtBottom(checkIfAtBottom());
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [checkIfAtBottom]);
+
+  // Auto-scroll to bottom when new messages arrive (if user is at bottom)
+  useEffect(() => {
+    const messageCount = displayMessages.length;
+    const prevCount = prevMessageCountRef.current;
+
+    if (messageCount === 0) {
+      prevMessageCountRef.current = 0;
+      return;
+    }
+
+    // For bottom-to-top, scroll to last index
+    // For top-to-bottom, scroll to first index (newest is at top)
+    const targetIndex = scrollDirection === "bottom-to-top" ? messageCount - 1 : 0;
+
+    // Initial load: scroll immediately without animation
+    if (prevCount === 0 && messageCount > 0) {
+      virtualizer.scrollToIndex(targetIndex, { align: "end" });
+      prevMessageCountRef.current = messageCount;
+      return;
+    }
+
+    // New messages added: scroll with animation if user is at bottom
+    if (messageCount > prevCount && isAtBottom) {
+      virtualizer.scrollToIndex(targetIndex, { align: "end", behavior: "smooth" });
+    }
+
+    prevMessageCountRef.current = messageCount;
+  }, [displayMessages.length, isAtBottom, scrollDirection, virtualizer]);
+
   const virtualItems = virtualizer.getVirtualItems();
 
   // Use the official TanStack Virtual pattern for dynamic sizing
   return (
     <div
-      ref={parentRef}
       style={{
         height: "100%",
         width: "100%",
-        overflowY: "auto",
-        contain: "strict", // Important for performance
+        position: "relative",
       }}
     >
-      {/* Inner container with total virtual height */}
+      {/* Scrollable container */}
       <div
+        ref={parentRef}
         style={{
-          height: virtualizer.getTotalSize(),
+          height: "100%",
           width: "100%",
-          position: "relative",
+          overflowY: "auto",
+          contain: "strict", // Important for performance
         }}
       >
-        {/* Wrapper that translates to first item's position */}
+        {/* Inner container with total virtual height */}
         <div
           style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
+            height: virtualizer.getTotalSize(),
             width: "100%",
-            transform: `translateY(${virtualItems[0]?.start ?? 0}px)`,
+            position: "relative",
           }}
         >
-          {/* Items flow normally inside the wrapper */}
-          {virtualItems.map((virtualItem) => {
-            const message = displayMessages[virtualItem.index];
-            return (
-              <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
-                style={{ paddingBottom: "0.5rem" }}
-              >
-                {message ? (
-                  <ChatMessage message={message} preferences={preferences} />
-                ) : (
-                  <div style={{ color: "red", fontSize: "12px", padding: "0.5rem" }}>
-                    ERROR: Message at index {virtualItem.index} is undefined
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {/* Wrapper that translates to first item's position */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${virtualItems[0]?.start ?? 0}px)`,
+            }}
+          >
+            {/* Items flow normally inside the wrapper */}
+            {virtualItems.map((virtualItem) => {
+              const message = displayMessages[virtualItem.index];
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
+                  style={{ paddingBottom: "0.5rem" }}
+                >
+                  {message ? (
+                    <ChatMessage message={message} preferences={preferences} />
+                  ) : (
+                    <div style={{ color: "red", fontSize: "12px", padding: "0.5rem" }}>
+                      ERROR: Message at index {virtualItem.index} is undefined
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
+
+      {/* Bottom indicator bar - shows when at bottom */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: "1px",
+          background: isAtBottom
+            ? "linear-gradient(90deg, rgba(59, 130, 246, 0.8) 0%, rgba(99, 160, 255, 0.9) 50%, rgba(59, 130, 246, 0.8) 100%)"
+            : "linear-gradient(90deg, rgba(100, 100, 100, 0.3) 0%, rgba(120, 120, 120, 0.4) 50%, rgba(100, 100, 100, 0.3) 100%)",
+          boxShadow: isAtBottom
+            ? "0 0 3px 1px rgba(59, 130, 246, 0.6), 0 0 5px 2px rgba(59, 130, 246, 0.3)"
+            : "none",
+          transition: "all 0.3s ease",
+          pointerEvents: "none",
+          zIndex: 10,
+        }}
+      />
     </div>
   );
 };

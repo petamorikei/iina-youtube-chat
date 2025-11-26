@@ -150,6 +150,13 @@ export const ChatInfoMessageSchema = z.object({
 });
 
 /**
+ * Schema for live-chat-messages message from plugin (live stream incremental updates)
+ */
+export const LiveChatMessagesSchema = z.object({
+  messages: z.array(ChatMessageSchema),
+});
+
+/**
  * Schema for position-update message from plugin
  */
 export const PositionUpdateMessageSchema = z.object({

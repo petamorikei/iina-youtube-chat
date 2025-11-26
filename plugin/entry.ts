@@ -1,6 +1,7 @@
 // IINA Plugin Entry Point for YouTube Chat
 // This file runs in IINA's JavaScriptCore context
 
+import { LiveChatFetcher, type LiveChatMetadata } from "./live-chat-fetcher";
 import {
   type AuthorBadge,
   type BadgeType,
@@ -15,11 +16,19 @@ import {
 // Destructure IINA API modules
 const { event, sidebar, standaloneWindow, menu, core, console: logger, utils, file, preferences } = iina;
 
+// Initialize live chat fetcher (uses utils.exec with curl to avoid blocking main thread)
+const liveChatFetcher = new LiveChatFetcher(utils, logger);
+
 // Plugin state
 let currentVideoUrl: string | null = null;
 let chatData: ChatMessage[] = [];
 let isStandaloneWindowOpen = false;
 let isStandaloneWindowReady = false;
+
+// Live chat state
+let isLiveStream = false;
+let liveChatMetadata: LiveChatMetadata | null = null;
+let liveChatPollingTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Get current preferences
@@ -455,11 +464,114 @@ const sendChatDataTo = (sendFn: (name: string, data: unknown) => void): void => 
   sendFn("chat-data-complete", { totalMessages: chatData.length });
 };
 
+// ============================================================
+// Live Chat Functions
+// ============================================================
+
 /**
- * Fetch chat data using yt-dlp
+ * Stop live chat polling
  */
-const fetchChatData = async (videoUrl: string): Promise<void> => {
-  logger.log(`[fetchChatData] Fetching chat data for: ${videoUrl}`);
+const stopLiveChatPolling = (): void => {
+  if (liveChatPollingTimer) {
+    clearTimeout(liveChatPollingTimer);
+    liveChatPollingTimer = null;
+  }
+  isLiveStream = false;
+  liveChatMetadata = null;
+};
+
+/**
+ * Poll for live chat messages
+ */
+const pollLiveChat = async (): Promise<void> => {
+  if (!liveChatMetadata || !isLiveStream) {
+    return;
+  }
+
+  const result = await liveChatFetcher.fetchLiveChat(liveChatMetadata);
+
+  if (!result.success) {
+    logger.error(`[pollLiveChat] Error: ${result.error}`);
+    // Continue polling even on error
+    liveChatPollingTimer = setTimeout(pollLiveChat, 5000);
+    return;
+  }
+
+  // Add new messages to chatData
+  if (result.messages.length > 0) {
+    const isFirstBatch = chatData.length === 0;
+    chatData.push(...result.messages);
+
+    // Log first batch to confirm polling works
+    if (isFirstBatch) {
+      logger.log(`[pollLiveChat] First batch received: ${result.messages.length} messages`);
+    }
+
+    // Send new messages to all webviews
+    sendToAll("live-chat-messages", { messages: result.messages });
+  }
+
+  // Update continuation token
+  if (result.continuation) {
+    liveChatMetadata = {
+      ...liveChatMetadata,
+      continuation: result.continuation,
+    };
+  }
+
+  // Schedule next poll
+  if (isLiveStream && result.continuation) {
+    const pollInterval = Math.max(result.timeoutMs, 1000); // Minimum 1 second
+    liveChatPollingTimer = setTimeout(pollLiveChat, pollInterval);
+  } else {
+    stopLiveChatPolling();
+  }
+};
+
+/**
+ * Start fetching live chat
+ */
+const startLiveChat = async (videoId: string): Promise<boolean> => {
+  logger.log(`[startLiveChat] Starting for video: ${videoId}`);
+
+  // Reset state
+  liveChatFetcher.resetMessageIndex();
+  chatData = [];
+
+  // Fetch metadata
+  const metadataResult = await liveChatFetcher.fetchMetadata(videoId);
+
+  if (!metadataResult.success) {
+    if (metadataResult.isNotLive) {
+      logger.log("[startLiveChat] Not a live stream, falling back to yt-dlp");
+      return false; // Not a live stream, fall back to yt-dlp
+    }
+    logger.error(`[startLiveChat] Failed to fetch metadata: ${metadataResult.error}`);
+    sendToAll("chat-error", {
+      message: "Failed to fetch live chat metadata",
+      error: metadataResult.error,
+    });
+    return true; // Tried live, but failed
+  }
+
+  // Store metadata and mark as live
+  liveChatMetadata = metadataResult.metadata;
+  isLiveStream = true;
+
+  logger.log("[startLiveChat] Live stream detected, starting polling");
+  sendToAll("chat-info", { message: "Live stream detected - fetching live chat..." });
+
+  // Start polling
+  pollLiveChat();
+
+  return true; // Handled as live stream
+};
+
+/**
+ * Fetch chat data using yt-dlp (for archived streams)
+ */
+const fetchArchivedChatData = async (videoUrl: string): Promise<void> => {
+  logger.log(`[fetchArchivedChatData] Fetching for: ${videoUrl}`);
   try {
     sendToAll("chat-loading", { loading: true });
 
@@ -476,7 +588,6 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
     for (const path of commonPaths) {
       if (utils.fileInPath(path)) {
         ytdlpPath = path;
-        logger.log(`[fetchChatData] Using yt-dlp: ${ytdlpPath}`);
         break;
       }
     }
@@ -528,13 +639,12 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
     }
 
     chatData = parseChatData(chatFileContent);
-    logger.log(`[fetchChatData] Successfully parsed ${chatData.length} chat messages`);
+    logger.log(`[fetchArchivedChatData] Parsed ${chatData.length} messages`);
 
     // Note: Temporary files in /tmp are left for OS to clean up
 
     // Send chat data to all webviews
     sendChatDataTo(sendToAll);
-    logger.log(`[fetchChatData] Chat data sent successfully (${chatData.length} messages)`);
 
     sendToAll("chat-loading", { loading: false });
   } catch (error) {
@@ -548,9 +658,37 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
 };
 
 /**
+ * Fetch chat data - tries live chat first, falls back to yt-dlp for archived streams
+ */
+const fetchChatData = async (videoUrl: string): Promise<void> => {
+  const videoId = extractVideoId(videoUrl);
+  if (!videoId) {
+    sendToAll("chat-error", { message: "Could not extract video ID" });
+    return;
+  }
+
+  // Stop any existing live chat polling
+  stopLiveChatPolling();
+
+  // Try live chat first
+  const isLive = await startLiveChat(videoId);
+  if (isLive) {
+    // Live chat is being handled (either successfully or with error)
+    sendToAll("chat-loading", { loading: false });
+    return;
+  }
+
+  // Not a live stream, use yt-dlp for archived chat
+  await fetchArchivedChatData(videoUrl);
+};
+
+/**
  * Handle file loaded event
  */
 const onFileLoaded = (): void => {
+  // Stop any existing live chat polling when file changes
+  stopLiveChatPolling();
+
   const url = core.status.url;
 
   if (!url) {
@@ -606,8 +744,7 @@ const onRetryFetch = (_data: unknown): void => {
  * Send current state when sidebar is ready
  */
 const onSidebarReady = (_data: unknown): void => {
-  logger.log("[onSidebarReady] Sidebar is ready, sending current state");
-
+  logger.log("[onSidebarReady] Sidebar ready");
   // Send current preferences to sidebar only
   sendPreferencesTo(sendToSidebar);
 
@@ -627,7 +764,6 @@ const onSidebarReady = (_data: unknown): void => {
  * Send current state when standalone window is ready
  */
 const onStandaloneWindowReady = (_data: unknown): void => {
-  logger.log("[onStandaloneWindowReady] Standalone window is ready, sending current state");
   isStandaloneWindowReady = true;
 
   // Send current preferences to standalone window only
@@ -651,7 +787,6 @@ const toggleStandaloneWindow = (): void => {
     standaloneWindow.close();
     isStandaloneWindowOpen = false;
     isStandaloneWindowReady = false;
-    logger.log("[toggleStandaloneWindow] Standalone window closed");
   } else {
     // Load the HTML file first
     standaloneWindow.loadFile("sidebar/index.html");
@@ -671,14 +806,12 @@ const toggleStandaloneWindow = (): void => {
     standaloneWindow.setFrame(400, 600, null, null);
     standaloneWindow.open();
     isStandaloneWindowOpen = true;
-    logger.log("[toggleStandaloneWindow] Standalone window opened");
   }
 };
 
 // Register event listeners
 event.on("iina.window-loaded", () => {
-  logger.log("[event] iina.window-loaded fired");
-
+  logger.log("[event] iina.window-loaded");
   // Initialize sidebar
   sidebar.loadFile("sidebar/index.html");
   sidebar.onMessage("retry-fetch", onRetryFetch);
@@ -687,7 +820,6 @@ event.on("iina.window-loaded", () => {
   // Add menu item to toggle standalone chat window
   const chatWindowMenuItem = menu.item("Open Chat Window", toggleStandaloneWindow);
   menu.addItem(chatWindowMenuItem);
-  logger.log("[event] Menu item added: Open Chat Window");
 });
 
 event.on("iina.file-loaded", (_url: string) => {

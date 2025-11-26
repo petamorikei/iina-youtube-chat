@@ -5,6 +5,7 @@ import {
   ChatErrorMessageSchema,
   ChatInfoMessageSchema,
   ChatLoadingMessageSchema,
+  LiveChatMessagesSchema,
   PositionUpdateMessageSchema,
   PreferencesUpdateMessageSchema,
 } from "../schemas";
@@ -122,6 +123,22 @@ export const useIINAMessages = () => {
       }
       const { message } = parseResult.data;
       setState((prev) => ({ ...prev, info: message, loading: false }));
+    });
+
+    iina.onMessage("live-chat-messages", (data: unknown) => {
+      const parseResult = LiveChatMessagesSchema.safeParse(data);
+      if (!parseResult.success) {
+        console.error("[useIINAMessages] Invalid live-chat-messages:", parseResult.error);
+        return;
+      }
+      const { messages: newMessages } = parseResult.data;
+      console.log(`[useIINAMessages] Received ${newMessages.length} live chat messages`);
+      // Append new messages to existing ones
+      setState((prev) => ({
+        ...prev,
+        messages: [...prev.messages, ...newMessages],
+        info: null, // Clear info message when receiving chat
+      }));
     });
 
     iina.onMessage("position-update", (data: unknown) => {
