@@ -21,7 +21,7 @@ const DEFAULT_PREFERENCES = {
 
 export const useIINAMessages = () => {
   const [state, setState] = useState<AppState>({
-    loading: false,
+    loading: true, // Start with loading state until plugin sends actual status
     error: null,
     info: null,
     messages: [],

@@ -73,6 +73,7 @@ Configure via IINA Settings → Plugins → iina-youtube-chat
 | Show timestamp | Display message timestamps | ON |
 | Show author name | Display author names | ON |
 | Show author photo | Display author profile photos | ON |
+| Auto-open chat window | Automatically open chat window for YouTube streams | ON |
 
 ## Supported Message Types
 

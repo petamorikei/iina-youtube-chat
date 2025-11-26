@@ -7,6 +7,20 @@ interface StatusMessageProps {
   onRetry?: () => void;
 }
 
+const LoadingSpinner = () => (
+  <div
+    style={{
+      width: "40px",
+      height: "40px",
+      border: "3px solid rgba(59, 130, 246, 0.2)",
+      borderTopColor: "#60a5fa",
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite",
+      margin: "0 auto 1rem",
+    }}
+  />
+);
+
 export const StatusMessage = ({ type, message, onRetry }: StatusMessageProps) => {
   const getStyles = () => {
     switch (type) {
@@ -31,13 +45,21 @@ export const StatusMessage = ({ type, message, onRetry }: StatusMessageProps) =>
   return (
     <div
       className={css({
-        padding: "1rem",
+        padding: "1.5rem",
         borderRadius: "0.5rem",
         textAlign: "center",
         ...getStyles(),
       })}
     >
-      <p className={css({ margin: 0 })}>{message}</p>
+      {type === "loading" && <LoadingSpinner />}
+      <p
+        style={{
+          margin: 0,
+          animation: type === "loading" ? "pulse 2s ease-in-out infinite" : "none",
+        }}
+      >
+        {message}
+      </p>
       {type === "error" && onRetry && (
         <button
           type="button"

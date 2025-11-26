@@ -39,6 +39,7 @@ const getPreferences = () => ({
   showTimestamp: (preferences.get("showTimestamp") as boolean | undefined) ?? true,
   showAuthorName: (preferences.get("showAuthorName") as boolean | undefined) ?? true,
   showAuthorPhoto: (preferences.get("showAuthorPhoto") as boolean | undefined) ?? true,
+  autoOpenChatWindow: (preferences.get("autoOpenChatWindow") as boolean | undefined) ?? true,
 });
 
 /**
@@ -561,10 +562,115 @@ const startLiveChat = async (videoId: string): Promise<boolean> => {
   logger.log("[startLiveChat] Live stream detected, starting polling");
   sendToAll("chat-info", { message: "Live stream detected - fetching live chat..." });
 
+  // Auto-open chat window if enabled
+  if (getPreferences().autoOpenChatWindow) {
+    openStandaloneWindow();
+  }
+
   // Start polling
   pollLiveChat();
 
   return true; // Handled as live stream
+};
+
+/**
+ * Find yt-dlp executable path
+ */
+const findYtdlpPath = (): string => {
+  const commonPaths = [
+    "/opt/homebrew/bin/yt-dlp", // macOS Apple Silicon (Homebrew)
+    "/usr/local/bin/yt-dlp", // macOS Intel (Homebrew) / Linux
+    "/usr/bin/yt-dlp", // Linux system package
+  ];
+
+  for (const path of commonPaths) {
+    if (utils.fileInPath(path)) {
+      return path;
+    }
+  }
+  return "yt-dlp"; // Fallback to PATH lookup
+};
+
+/**
+ * Check if chat is available for a video using yt-dlp metadata
+ * Returns true if chat is available, false otherwise
+ */
+const checkChatAvailability = async (videoUrl: string): Promise<{ available: boolean; isLive: boolean }> => {
+  const ytdlpPath = findYtdlpPath();
+
+  try {
+    const result = await utils.exec(ytdlpPath, ["--dump-json", "--no-download", videoUrl]);
+
+    if (result.status !== 0) {
+      logger.warn(`[checkChatAvailability] yt-dlp failed: ${result.stderr}`);
+      return { available: false, isLive: false };
+    }
+
+    const metadata = JSON.parse(result.stdout);
+    const isLive = metadata.is_live === true;
+    const subtitles = metadata.subtitles || {};
+    const hasChatSubtitle = "live_chat" in subtitles;
+
+    logger.log(`[checkChatAvailability] isLive: ${isLive}, hasChatSubtitle: ${hasChatSubtitle}`);
+
+    return { available: hasChatSubtitle || isLive, isLive };
+  } catch (error) {
+    logger.error(`[checkChatAvailability] Error: ${error}`);
+    return { available: false, isLive: false };
+  }
+};
+
+/**
+ * Download archived chat data using yt-dlp (called after window is already open)
+ */
+const downloadArchivedChatData = async (videoUrl: string): Promise<void> => {
+  logger.log(`[downloadArchivedChatData] Downloading for: ${videoUrl}`);
+
+  const ytdlpPath = findYtdlpPath();
+  const videoId = extractVideoId(videoUrl);
+  if (!videoId) {
+    throw new Error("Could not extract video ID");
+  }
+
+  const tmpDir = "/tmp";
+  const outputTemplate = `${tmpDir}/iina-youtube-chat-${videoId}`;
+  const chatFilePath = `${outputTemplate}.live_chat.json`;
+
+  // Execute yt-dlp to download live chat
+  const result = await utils.exec(
+    ytdlpPath,
+    [
+      "--write-subs",
+      "--sub-lang",
+      "live_chat",
+      "--skip-download",
+      "--extractor-args",
+      "youtube:player_client=default",
+      "-o",
+      outputTemplate,
+      videoUrl,
+    ],
+    tmpDir,
+  );
+
+  if (result.status !== 0) {
+    throw new Error(`yt-dlp failed with status ${result.status}: ${result.stderr}`);
+  }
+
+  if (!file.exists(chatFilePath)) {
+    throw new Error(`Chat file not found: ${chatFilePath}`);
+  }
+
+  const chatFileContent = file.read(chatFilePath);
+  if (!chatFileContent) {
+    throw new Error("Failed to read chat file");
+  }
+
+  chatData = parseChatData(chatFileContent);
+  logger.log(`[downloadArchivedChatData] Parsed ${chatData.length} messages`);
+
+  // Send chat data to all webviews
+  sendChatDataTo(sendToAll);
 };
 
 /**
@@ -575,80 +681,11 @@ const fetchArchivedChatData = async (videoUrl: string): Promise<void> => {
   try {
     sendToAll("chat-loading", { loading: true });
 
-    // Find yt-dlp executable path
-    // The PATH environment in JavaScriptCore might differ from the user's shell,
-    // so we check common installation locations first.
-    const commonPaths = [
-      "/opt/homebrew/bin/yt-dlp", // macOS Apple Silicon (Homebrew)
-      "/usr/local/bin/yt-dlp", // macOS Intel (Homebrew) / Linux
-      "/usr/bin/yt-dlp", // Linux system package
-    ];
-
-    let ytdlpPath = "yt-dlp"; // Fallback to PATH lookup
-    for (const path of commonPaths) {
-      if (utils.fileInPath(path)) {
-        ytdlpPath = path;
-        break;
-      }
-    }
-
-    // Extract video ID for output filename
-    const videoId = extractVideoId(videoUrl);
-    if (!videoId) {
-      throw new Error("Could not extract video ID");
-    }
-
-    // Set output template and working directory
-    // Use /tmp for yt-dlp output and IINA file API access
-    const tmpDir = "/tmp";
-    const outputTemplate = `${tmpDir}/iina-youtube-chat-${videoId}`;
-
-    // Chat file path - using system path directly
-    const chatFilePath = `${outputTemplate}.live_chat.json`;
-
-    // Execute yt-dlp to download live chat
-    const result = await utils.exec(
-      ytdlpPath,
-      [
-        "--write-subs",
-        "--sub-lang",
-        "live_chat",
-        "--skip-download",
-        "--extractor-args",
-        "youtube:player_client=default",
-        "-o",
-        outputTemplate,
-        videoUrl,
-      ],
-      tmpDir,
-    );
-
-    if (result.status !== 0) {
-      throw new Error(`yt-dlp failed with status ${result.status}: ${result.stderr}`);
-    }
-
-    // Check if file exists
-    if (!file.exists(chatFilePath)) {
-      throw new Error(`Chat file not found: ${chatFilePath}`);
-    }
-
-    // Read and parse chat data
-    const chatFileContent = file.read(chatFilePath);
-    if (!chatFileContent) {
-      throw new Error("Failed to read chat file");
-    }
-
-    chatData = parseChatData(chatFileContent);
-    logger.log(`[fetchArchivedChatData] Parsed ${chatData.length} messages`);
-
-    // Note: Temporary files in /tmp are left for OS to clean up
-
-    // Send chat data to all webviews
-    sendChatDataTo(sendToAll);
+    await downloadArchivedChatData(videoUrl);
 
     sendToAll("chat-loading", { loading: false });
   } catch (error) {
-    logger.error(`[fetchChatData] ERROR: ${error}`);
+    logger.error(`[fetchArchivedChatData] ERROR: ${error}`);
     sendToAll("chat-error", {
       message: "Failed to fetch chat data",
       error: String(error),
@@ -658,7 +695,10 @@ const fetchArchivedChatData = async (videoUrl: string): Promise<void> => {
 };
 
 /**
- * Fetch chat data - tries live chat first, falls back to yt-dlp for archived streams
+ * Fetch chat data - uses metadata-first approach for faster window opening
+ * 1. Quick metadata check with yt-dlp --dump-json
+ * 2. If chat available, open window immediately with loading state
+ * 3. Download full chat data in background
  */
 const fetchChatData = async (videoUrl: string): Promise<void> => {
   const videoId = extractVideoId(videoUrl);
@@ -670,15 +710,35 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
   // Stop any existing live chat polling
   stopLiveChatPolling();
 
-  // Try live chat first
-  const isLive = await startLiveChat(videoId);
-  if (isLive) {
-    // Live chat is being handled (either successfully or with error)
-    sendToAll("chat-loading", { loading: false });
+  // First, do a quick metadata check to see if chat is available
+  sendToAll("chat-info", { message: "Checking for chat data..." });
+  const { available, isLive } = await checkChatAvailability(videoUrl);
+
+  if (!available) {
+    sendToAll("chat-info", { message: "No chat data available for this video" });
     return;
   }
 
-  // Not a live stream, use yt-dlp for archived chat
+  // Chat is available
+  if (isLive) {
+    // For live streams, use live chat API (startLiveChat will auto-open window)
+    const handled = await startLiveChat(videoId);
+    if (handled) {
+      sendToAll("chat-loading", { loading: false });
+      return;
+    }
+    // If live chat API failed, fall through to archived approach
+  }
+
+  // For archived streams: open window immediately, then download in background
+  logger.log("[fetchChatData] Archived chat detected, opening window immediately");
+
+  // Auto-open chat window if enabled (before download starts)
+  if (getPreferences().autoOpenChatWindow) {
+    openStandaloneWindow();
+  }
+
+  // Now download chat data in background
   await fetchArchivedChatData(videoUrl);
 };
 
@@ -749,12 +809,18 @@ const onSidebarReady = (_data: unknown): void => {
   sendPreferencesTo(sendToSidebar);
 
   if (!currentVideoUrl) {
+    // No video loaded yet - clear loading state and show info message
+    sendToSidebar("chat-info", { message: "Open a YouTube video to see chat" });
     return;
   }
 
   if (chatData.length > 0) {
     sendChatDataTo(sendToSidebar);
+  } else if (isLiveStream) {
+    // Live stream is active but no messages yet - show loading
+    sendToSidebar("chat-loading", { loading: true });
   } else {
+    // No chat data yet, fetch it
     fetchChatData(currentVideoUrl);
   }
 };
@@ -770,13 +836,46 @@ const onStandaloneWindowReady = (_data: unknown): void => {
   sendPreferencesTo((name, data) => standaloneWindow.postMessage(name, data));
 
   if (!currentVideoUrl) {
+    // No video loaded yet - clear loading state and show info message
+    standaloneWindow.postMessage("chat-info", { message: "Open a YouTube video to see chat" });
     return;
   }
 
   if (chatData.length > 0) {
     sendChatDataTo((name, data) => standaloneWindow.postMessage(name, data));
+  } else {
+    // Video is loading but chat data not yet available - show loading state
+    standaloneWindow.postMessage("chat-loading", { loading: true });
   }
   // Note: Don't fetch chat data again; sidebar already handles this
+};
+
+/**
+ * Open standalone chat window (if not already open)
+ */
+const openStandaloneWindow = (): void => {
+  if (isStandaloneWindowOpen) {
+    return; // Already open
+  }
+
+  // Load the HTML file first
+  standaloneWindow.loadFile("sidebar/index.html");
+
+  // Register message handlers AFTER loadFile
+  // This ensures handlers are active for the newly loaded webview
+  standaloneWindow.onMessage("retry-fetch", onRetryFetch);
+  standaloneWindow.onMessage("sidebar-ready", onStandaloneWindowReady);
+
+  standaloneWindow.setProperty({
+    title: "YouTube Chat",
+    resizable: true,
+    hudWindow: true,
+    fullSizeContentView: true,
+    hideTitleBar: false,
+  });
+  standaloneWindow.setFrame(400, 600, null, null);
+  standaloneWindow.open();
+  isStandaloneWindowOpen = true;
 };
 
 /**
@@ -788,24 +887,7 @@ const toggleStandaloneWindow = (): void => {
     isStandaloneWindowOpen = false;
     isStandaloneWindowReady = false;
   } else {
-    // Load the HTML file first
-    standaloneWindow.loadFile("sidebar/index.html");
-
-    // Register message handlers AFTER loadFile
-    // This ensures handlers are active for the newly loaded webview
-    standaloneWindow.onMessage("retry-fetch", onRetryFetch);
-    standaloneWindow.onMessage("sidebar-ready", onStandaloneWindowReady);
-
-    standaloneWindow.setProperty({
-      title: "YouTube Chat",
-      resizable: true,
-      hudWindow: true,
-      fullSizeContentView: true,
-      hideTitleBar: false,
-    });
-    standaloneWindow.setFrame(400, 600, null, null);
-    standaloneWindow.open();
-    isStandaloneWindowOpen = true;
+    openStandaloneWindow();
   }
 };
 
@@ -824,6 +906,17 @@ event.on("iina.window-loaded", () => {
 
 event.on("iina.file-loaded", (_url: string) => {
   onFileLoaded();
+});
+
+event.on("iina.window-will-close", () => {
+  // Close standalone chat window when player window closes
+  if (isStandaloneWindowOpen) {
+    standaloneWindow.close();
+    isStandaloneWindowOpen = false;
+    isStandaloneWindowReady = false;
+  }
+  // Stop live chat polling
+  stopLiveChatPolling();
 });
 
 event.on("mpv.time-pos.changed", onPositionChanged);
