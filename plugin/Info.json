@@ -21,6 +21,7 @@
     "showTimestamp": true,
     "showAuthorName": true,
     "showAuthorPhoto": true,
-    "autoOpenChatWindow": true
+    "autoOpenChatWindow": true,
+    "fontScale": 100
   }
 }

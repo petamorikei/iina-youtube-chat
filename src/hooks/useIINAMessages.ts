@@ -17,6 +17,7 @@ const DEFAULT_PREFERENCES = {
   showTimestamp: true,
   showAuthorName: true,
   showAuthorPhoto: true,
+  fontScale: 100,
 };
 
 export const useIINAMessages = () => {
@@ -157,10 +158,11 @@ export const useIINAMessages = () => {
         console.error("[useIINAMessages] Invalid preferences-update message:", parseResult.error);
         return;
       }
-      const { maxMessages, scrollDirection, showTimestamp, showAuthorName, showAuthorPhoto } = parseResult.data;
+      const { maxMessages, scrollDirection, showTimestamp, showAuthorName, showAuthorPhoto, fontScale } =
+        parseResult.data;
       setState((prev) => ({
         ...prev,
-        preferences: { maxMessages, scrollDirection, showTimestamp, showAuthorName, showAuthorPhoto },
+        preferences: { maxMessages, scrollDirection, showTimestamp, showAuthorName, showAuthorPhoto, fontScale },
       }));
     });
 

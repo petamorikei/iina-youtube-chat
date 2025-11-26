@@ -41,6 +41,19 @@
     .checkbox-group input[type="checkbox"] {
       margin-right: 6px;
     }
+    .range-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .range-group input[type="range"] {
+      flex: 1;
+    }
+    .range-value {
+      min-width: 45px;
+      text-align: right;
+    }
   </style>
 </head>
 <body>
@@ -56,6 +69,25 @@
     />
     <p class="small secondary pref-help">
       Number of chat messages to display (0 = unlimited)
+    </p>
+  </div>
+
+  <div class="pref-section">
+    <label class="pref-label">Font scale</label>
+    <div class="range-group">
+      <input
+        type="range"
+        id="fontScaleRange"
+        data-type="int"
+        data-pref-key="fontScale"
+        min="50"
+        max="200"
+        step="25"
+      />
+      <span class="range-value" id="fontScaleValue">100%</span>
+    </div>
+    <p class="small secondary pref-help">
+      Adjust the font size of chat messages (50% - 200%)
     </p>
   </div>
 
@@ -101,5 +133,30 @@
     </div>
   </div>
 
+  <p class="small secondary" style="margin-top: 24px; color: #888;">
+    Note: Some settings require reloading the plugin to take effect.
+  </p>
+
+  <script>
+    // Update font scale display value
+    const fontScaleRange = document.getElementById('fontScaleRange');
+    const fontScaleValue = document.getElementById('fontScaleValue');
+
+    function updateFontScaleDisplay() {
+      fontScaleValue.textContent = `${fontScaleRange.value}%`;
+    }
+
+    fontScaleRange.addEventListener('input', updateFontScaleDisplay);
+
+    // Initialize display value when page loads
+    // Use MutationObserver to detect when IINA sets the initial value
+    const observer = new MutationObserver(() => {
+      updateFontScaleDisplay();
+    });
+    observer.observe(fontScaleRange, { attributes: true, attributeFilter: ['value'] });
+
+    // Also update on load in case value is already set
+    setTimeout(updateFontScaleDisplay, 100);
+  </script>
 </body>
 </html>

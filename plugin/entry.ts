@@ -40,6 +40,7 @@ const getPreferences = () => ({
   showAuthorName: (preferences.get("showAuthorName") as boolean | undefined) ?? true,
   showAuthorPhoto: (preferences.get("showAuthorPhoto") as boolean | undefined) ?? true,
   autoOpenChatWindow: (preferences.get("autoOpenChatWindow") as boolean | undefined) ?? true,
+  fontScale: (preferences.get("fontScale") as number | undefined) ?? 100,
 });
 
 /**
@@ -438,6 +439,7 @@ const sendPreferencesTo = (sendFn: (name: string, data: unknown) => void): void 
     showTimestamp: prefs.showTimestamp,
     showAuthorName: prefs.showAuthorName,
     showAuthorPhoto: prefs.showAuthorPhoto,
+    fontScale: prefs.fontScale,
   });
 };
 

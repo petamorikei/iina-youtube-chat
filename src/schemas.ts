@@ -179,6 +179,7 @@ export const PreferencesUpdateMessageSchema = z.object({
   showTimestamp: z.boolean(),
   showAuthorName: z.boolean(),
   showAuthorPhoto: z.boolean(),
+  fontScale: z.number(),
 });
 
 /**
@@ -190,4 +191,5 @@ export interface UserPreferences {
   showTimestamp: boolean;
   showAuthorName: boolean;
   showAuthorPhoto: boolean;
+  fontScale: number;
 }
