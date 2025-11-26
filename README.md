@@ -5,6 +5,8 @@ Display YouTube live chat and archived stream chat synchronized with video playb
 ![IINA](https://img.shields.io/badge/IINA-1.4.0+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+![Screenshot](./screenshot.png)
+
 ## Features
 
 - **Live Streams**: Fetch and display chat in real-time
