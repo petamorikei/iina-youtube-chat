@@ -861,7 +861,7 @@ const openStandaloneWindow = (): void => {
   }
 
   // Load the HTML file first
-  standaloneWindow.loadFile("sidebar/index.html");
+  standaloneWindow.loadFile("dist/sidebar/index.html");
 
   // Register message handlers AFTER loadFile
   // This ensures handlers are active for the newly loaded webview
@@ -897,7 +897,7 @@ const toggleStandaloneWindow = (): void => {
 event.on("iina.window-loaded", () => {
   logger.log("[event] iina.window-loaded");
   // Initialize sidebar
-  sidebar.loadFile("sidebar/index.html");
+  sidebar.loadFile("dist/sidebar/index.html");
   sidebar.onMessage("retry-fetch", onRetryFetch);
   sidebar.onMessage("sidebar-ready", onSidebarReady);
 

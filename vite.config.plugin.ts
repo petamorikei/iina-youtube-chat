@@ -9,7 +9,7 @@ export default defineConfig({
       name: "IINAYouTubeChatPlugin",
       fileName: () => "main.js",
     },
-    outDir: "dist/com.petamorikei.iina-youtube-chat.iinaplugin",
+    outDir: "dist",
     emptyOutDir: false,
     rollupOptions: {
       output: {

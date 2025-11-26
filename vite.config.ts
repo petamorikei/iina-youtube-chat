@@ -15,7 +15,7 @@ export default defineConfig({
   plugins: [react(), removeModuleType()],
   base: "./", // Use relative paths for plugin context
   build: {
-    outDir: "dist/com.petamorikei.iina-youtube-chat.iinaplugin/sidebar",
+    outDir: "dist/sidebar",
     emptyOutDir: false,
     target: "es2015", // Target older browsers (ES2015/ES6)
     rollupOptions: {

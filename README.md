@@ -132,33 +132,33 @@ pnpm check
 ### Project Structure
 
 ```
-├── plugin/           # IINA plugin entry point
+├── Info.json         # Plugin metadata (at root for GitHub distribution)
+├── plugin/           # IINA plugin source code
 │   ├── entry.ts      # Main entry
-│   ├── live-chat-fetcher.ts  # Live chat fetching
-│   ├── schemas.ts    # Zod schema definitions
-│   └── Info.json     # Plugin metadata
+│   ├── liveChatFetcher.ts  # Live chat fetching
+│   └── schemas.ts    # Zod schema definitions
 ├── src/              # React sidebar UI
 │   ├── App.tsx
 │   ├── components/
 │   └── hooks/
-└── dist/             # Build output
+└── dist/             # Build output (committed for GitHub distribution)
 ```
 
 ### Development Plugin Linking
 
 ```bash
-# Symlink plugin to IINA
-iina-plugin link dist/com.petamorikei.iina-youtube-chat.iinaplugin
+# Symlink plugin to IINA (from project root)
+iina-plugin link .
 
 # Unlink
-iina-plugin unlink dist/com.petamorikei.iina-youtube-chat.iinaplugin
+iina-plugin unlink .
 ```
 
 ### Packaging
 
 ```bash
 # Generate .iinaplgz file
-iina-plugin pack dist/com.petamorikei.iina-youtube-chat.iinaplugin
+iina-plugin pack .
 ```
 
 ## License

@@ -8,13 +8,13 @@
     "name": "petamorikei"
   },
   "description": "Display YouTube live chat synchronized with video playback",
-  "entry": "main.js",
+  "entry": "dist/main.js",
   "permissions": ["file-system", "network-request"],
   "allowedDomains": ["*"],
   "sidebarTab": {
     "name": "Chat"
   },
-  "preferencesPage": "preferences.html",
+  "preferencesPage": "dist/preferences.html",
   "preferenceDefaults": {
     "maxMessages": 200,
     "scrollDirection": "bottom-to-top",
