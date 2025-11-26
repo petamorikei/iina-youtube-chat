@@ -13,11 +13,13 @@ import {
 } from "./schemas";
 
 // Destructure IINA API modules
-const { event, sidebar, core, console: logger, utils, file, preferences } = iina;
+const { event, sidebar, standaloneWindow, menu, core, console: logger, utils, file, preferences } = iina;
 
 // Plugin state
 let currentVideoUrl: string | null = null;
 let chatData: ChatMessage[] = [];
+let isStandaloneWindowOpen = false;
+let isStandaloneWindowReady = false;
 
 /**
  * Get current preferences
@@ -38,17 +40,20 @@ const sendToSidebar = (name: string, data: unknown): void => {
 };
 
 /**
- * Send preferences to sidebar
+ * Send message to standalone window
  */
-const sendPreferences = (): void => {
-  const prefs = getPreferences();
-  sendToSidebar("preferences-update", {
-    maxMessages: prefs.maxMessages,
-    scrollDirection: prefs.scrollDirection,
-    showTimestamp: prefs.showTimestamp,
-    showAuthorName: prefs.showAuthorName,
-    showAuthorPhoto: prefs.showAuthorPhoto,
-  });
+const sendToStandaloneWindow = (name: string, data: unknown): void => {
+  if (isStandaloneWindowOpen && isStandaloneWindowReady) {
+    standaloneWindow.postMessage(name, data);
+  }
+};
+
+/**
+ * Send message to all webviews (sidebar and standalone window)
+ */
+const sendToAll = (name: string, data: unknown): void => {
+  sendToSidebar(name, data);
+  sendToStandaloneWindow(name, data);
 };
 
 /**
@@ -413,9 +418,9 @@ const parseChatData = (fileContent: string): ChatMessage[] => {
 };
 
 /**
- * Send chat data to sidebar in chunks
+ * Send chat data to a specific webview (sidebar or standalone window)
  */
-const sendChatData = (): void => {
+const sendChatDataTo = (sendFn: (name: string, data: unknown) => void): void => {
   const CHUNK_SIZE = 100;
   const totalChunks = Math.ceil(chatData.length / CHUNK_SIZE);
 
@@ -424,7 +429,7 @@ const sendChatData = (): void => {
     const end = Math.min(start + CHUNK_SIZE, chatData.length);
     const chunk = chatData.slice(start, end);
 
-    sendToSidebar("chat-data-chunk", {
+    sendFn("chat-data-chunk", {
       chunk,
       chunkIndex: i,
       totalChunks,
@@ -433,7 +438,7 @@ const sendChatData = (): void => {
     });
   }
 
-  sendToSidebar("chat-data-complete", { totalMessages: chatData.length });
+  sendFn("chat-data-complete", { totalMessages: chatData.length });
 };
 
 /**
@@ -443,7 +448,7 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
   logger.log(`[fetchChatData] Fetching chat data for: ${videoUrl}`);
   try {
     logger.log("[fetchChatData] Sending chat-loading(true) message");
-    sendToSidebar("chat-loading", { loading: true });
+    sendToAll("chat-loading", { loading: true });
     logger.log("[fetchChatData] chat-loading(true) message sent");
 
     // Find yt-dlp executable path
@@ -536,7 +541,7 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
       const end = Math.min(start + CHUNK_SIZE, chatData.length);
       const chunk = chatData.slice(start, end);
 
-      sendToSidebar("chat-data-chunk", {
+      sendToAll("chat-data-chunk", {
         chunk,
         chunkIndex: i,
         totalChunks,
@@ -550,18 +555,18 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
     }
 
     // Send completion message
-    sendToSidebar("chat-data-complete", { totalMessages: chatData.length });
+    sendToAll("chat-data-complete", { totalMessages: chatData.length });
     logger.log(`[fetchChatData] All chunks sent successfully (${totalChunks} chunks, ${chatData.length} messages)`);
 
-    sendToSidebar("chat-loading", { loading: false });
+    sendToAll("chat-loading", { loading: false });
     logger.log("[fetchChatData] chat-loading(false) message sent successfully");
   } catch (error) {
     logger.error(`[fetchChatData] ERROR: ${error}`);
-    sendToSidebar("chat-error", {
+    sendToAll("chat-error", {
       message: "Failed to fetch chat data",
       error: String(error),
     });
-    sendToSidebar("chat-loading", { loading: false });
+    sendToAll("chat-loading", { loading: false });
   }
 };
 
@@ -576,7 +581,7 @@ const onFileLoaded = (): void => {
   }
 
   if (!isYouTubeUrl(url)) {
-    sendToSidebar("chat-info", {
+    sendToAll("chat-info", {
       message: "This is not a YouTube video",
     });
     return;
@@ -584,7 +589,7 @@ const onFileLoaded = (): void => {
 
   const videoId = extractVideoId(url);
   if (!videoId) {
-    sendToSidebar("chat-error", {
+    sendToAll("chat-error", {
       message: "Could not extract YouTube video ID",
     });
     return;
@@ -606,8 +611,8 @@ const onPositionChanged = (): void => {
     return;
   }
 
-  // Send current position to sidebar for timestamp-based filtering
-  sendToSidebar("position-update", { position });
+  // Send current position to all webviews for timestamp-based filtering
+  sendToAll("position-update", { position });
 };
 
 /**
@@ -627,27 +632,100 @@ const onRetryFetch = (_data: unknown): void => {
 const onSidebarReady = (_data: unknown): void => {
   logger.log("[onSidebarReady] Sidebar is ready, sending current state");
 
-  // Send current preferences
-  sendPreferences();
+  // Send current preferences to sidebar only
+  const prefs = getPreferences();
+  sendToSidebar("preferences-update", {
+    maxMessages: prefs.maxMessages,
+    scrollDirection: prefs.scrollDirection,
+    showTimestamp: prefs.showTimestamp,
+    showAuthorName: prefs.showAuthorName,
+    showAuthorPhoto: prefs.showAuthorPhoto,
+  });
 
   if (!currentVideoUrl) {
     return;
   }
 
   if (chatData.length > 0) {
-    sendChatData();
+    sendChatDataTo(sendToSidebar);
   } else {
     fetchChatData(currentVideoUrl);
+  }
+};
+
+/**
+ * Handle standalone-window-ready message from standalone window
+ * Send current state when standalone window is ready
+ */
+const onStandaloneWindowReady = (_data: unknown): void => {
+  logger.log("[onStandaloneWindowReady] Standalone window is ready, sending current state");
+  isStandaloneWindowReady = true;
+
+  // Send current preferences to standalone window only
+  const prefs = getPreferences();
+  standaloneWindow.postMessage("preferences-update", {
+    maxMessages: prefs.maxMessages,
+    scrollDirection: prefs.scrollDirection,
+    showTimestamp: prefs.showTimestamp,
+    showAuthorName: prefs.showAuthorName,
+    showAuthorPhoto: prefs.showAuthorPhoto,
+  });
+
+  if (!currentVideoUrl) {
+    return;
+  }
+
+  if (chatData.length > 0) {
+    sendChatDataTo((name, data) => standaloneWindow.postMessage(name, data));
+  }
+  // Note: Don't fetch chat data again; sidebar already handles this
+};
+
+/**
+ * Toggle standalone chat window
+ */
+const toggleStandaloneWindow = (): void => {
+  if (isStandaloneWindowOpen) {
+    standaloneWindow.close();
+    isStandaloneWindowOpen = false;
+    isStandaloneWindowReady = false;
+    logger.log("[toggleStandaloneWindow] Standalone window closed");
+  } else {
+    // Load the HTML file first
+    standaloneWindow.loadFile("sidebar/index.html");
+
+    // Register message handlers AFTER loadFile
+    // This ensures handlers are active for the newly loaded webview
+    standaloneWindow.onMessage("retry-fetch", onRetryFetch);
+    standaloneWindow.onMessage("sidebar-ready", onStandaloneWindowReady);
+
+    standaloneWindow.setProperty({
+      title: "YouTube Chat",
+      resizable: true,
+      hudWindow: true,
+      fullSizeContentView: true,
+      hideTitleBar: false,
+    });
+    standaloneWindow.setFrame(400, 600, null, null);
+    standaloneWindow.open();
+    isStandaloneWindowOpen = true;
+    logger.log("[toggleStandaloneWindow] Standalone window opened");
   }
 };
 
 // Register event listeners
 event.on("iina.window-loaded", () => {
   logger.log("[event] iina.window-loaded fired");
+
   // Initialize sidebar
   sidebar.loadFile("sidebar/index.html");
   sidebar.onMessage("retry-fetch", onRetryFetch);
   sidebar.onMessage("sidebar-ready", onSidebarReady);
+
+  // Add menu item to toggle standalone chat window
+  const chatWindowMenuItem = menu.item("Open Chat Window", toggleStandaloneWindow);
+  menu.addItem(chatWindowMenuItem);
+  logger.log("[event] Menu item added: Open Chat Window");
 });
 
 event.on("iina.file-loaded", (_url: string) => {
