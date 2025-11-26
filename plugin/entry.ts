@@ -1,7 +1,7 @@
 // IINA Plugin Entry Point for YouTube Chat
 // This file runs in IINA's JavaScriptCore context
 
-import { LiveChatFetcher, type LiveChatMetadata } from "./live-chat-fetcher";
+import { LiveChatFetcher, type LiveChatMetadata } from "./liveChatFetcher";
 import {
   type AuthorBadge,
   type BadgeType,

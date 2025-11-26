@@ -15,6 +15,8 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
 
   // Track if user is at the bottom (should auto-scroll)
   const [isAtBottom, setIsAtBottom] = useState(true);
+  // Delayed state for showing scroll button (prevents flicker during auto-scroll)
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const prevMessageCountRef = useRef(0);
 
   // Filter and limit messages based on current position and preferences
@@ -74,6 +76,18 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
     return () => el.removeEventListener("scroll", handleScroll);
   }, [checkIfAtLatestEdge]);
 
+  // Delayed scroll button visibility (500ms delay to prevent flicker during auto-scroll)
+  useEffect(() => {
+    if (isAtBottom) {
+      // Hide immediately when at bottom
+      setShowScrollButton(false);
+    } else {
+      // Show after delay when not at bottom
+      const timer = setTimeout(() => setShowScrollButton(true), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isAtBottom]);
+
   // Auto-scroll to bottom when new messages arrive (if user is at bottom)
   useEffect(() => {
     const messageCount = displayMessages.length;
@@ -104,6 +118,12 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
   }, [displayMessages.length, isAtBottom, scrollDirection, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
+
+  // Scroll to latest messages
+  const scrollToLatest = useCallback(() => {
+    const targetIndex = scrollDirection === "bottom-to-top" ? displayMessages.length - 1 : 0;
+    virtualizer.scrollToIndex(targetIndex, { align: "end", behavior: "smooth" });
+  }, [scrollDirection, displayMessages.length, virtualizer]);
 
   // Use the official TanStack Virtual pattern for dynamic sizing
   return (
@@ -178,14 +198,65 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
           background: isAtBottom
             ? "linear-gradient(90deg, rgba(59, 130, 246, 0.8) 0%, rgba(99, 160, 255, 0.9) 50%, rgba(59, 130, 246, 0.8) 100%)"
             : "linear-gradient(90deg, rgba(100, 100, 100, 0.3) 0%, rgba(120, 120, 120, 0.4) 50%, rgba(100, 100, 100, 0.3) 100%)",
-          boxShadow: isAtBottom
-            ? "0 0 3px 1px rgba(59, 130, 246, 0.6), 0 0 5px 2px rgba(59, 130, 246, 0.3)"
-            : "none",
+          boxShadow: isAtBottom ? "0 0 3px 1px rgba(59, 130, 246, 0.6), 0 0 5px 2px rgba(59, 130, 246, 0.3)" : "none",
           transition: "all 0.3s ease",
           pointerEvents: "none",
           zIndex: 10,
         }}
       />
+
+      {/* Scroll to latest button - shows when not at latest edge (with 500ms delay) */}
+      {showScrollButton && displayMessages.length > 0 && (
+        <button
+          type="button"
+          onClick={scrollToLatest}
+          aria-label="Scroll to latest"
+          style={{
+            position: "absolute",
+            right: "12px",
+            top: scrollDirection === "top-to-bottom" ? "12px" : undefined,
+            bottom: scrollDirection === "bottom-to-top" ? "12px" : undefined,
+            width: "36px",
+            height: "36px",
+            borderRadius: "50%",
+            backgroundColor: "rgba(59, 130, 246, 0.9)",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.3)",
+            transition: "all 0.2s ease",
+            zIndex: 20,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 1)";
+            e.currentTarget.style.transform = "scale(1.1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 0.9)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          {/* Arrow icon - decorative, button provides semantic meaning */}
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{
+              transform: scrollDirection === "top-to-bottom" ? "rotate(180deg)" : "none",
+            }}
+          >
+            <path d="M12 5v14M5 12l7 7 7-7" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 };
