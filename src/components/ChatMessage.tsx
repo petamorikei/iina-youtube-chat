@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { css } from "../../styled-system/css";
 import type { AuthorBadge, ChatMessage as ChatMessageType, MessageRun, UserPreferences } from "../types";
 
@@ -181,7 +182,7 @@ const getMessageStyle = (message: ChatMessageType) => {
   }
 };
 
-export const ChatMessage = ({ message, preferences }: ChatMessageProps) => {
+export const ChatMessage = memo(({ message, preferences }: ChatMessageProps) => {
   const style = getMessageStyle(message);
   const isSpecialMessage = ["superchat", "supersticker", "membership", "gift"].includes(message.type);
   const { showTimestamp, showAuthorName, showAuthorPhoto } = preferences;
@@ -340,4 +341,4 @@ export const ChatMessage = ({ message, preferences }: ChatMessageProps) => {
       </div>
     </div>
   );
-};
+});

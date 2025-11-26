@@ -117,13 +117,6 @@ export const ChatLoadingMessageSchema = z.object({
 });
 
 /**
- * Schema for chat-data message from plugin (legacy, replaced by chunks)
- */
-export const ChatDataMessageSchema = z.object({
-  messages: z.array(ChatMessageSchema),
-});
-
-/**
  * Schema for chat-data-chunk message from plugin
  */
 export const ChatDataChunkMessageSchema = z.object({

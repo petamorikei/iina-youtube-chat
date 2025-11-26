@@ -418,6 +418,20 @@ const parseChatData = (fileContent: string): ChatMessage[] => {
 };
 
 /**
+ * Send preferences to a specific webview
+ */
+const sendPreferencesTo = (sendFn: (name: string, data: unknown) => void): void => {
+  const prefs = getPreferences();
+  sendFn("preferences-update", {
+    maxMessages: prefs.maxMessages,
+    scrollDirection: prefs.scrollDirection,
+    showTimestamp: prefs.showTimestamp,
+    showAuthorName: prefs.showAuthorName,
+    showAuthorPhoto: prefs.showAuthorPhoto,
+  });
+};
+
+/**
  * Send chat data to a specific webview (sidebar or standalone window)
  */
 const sendChatDataTo = (sendFn: (name: string, data: unknown) => void): void => {
@@ -447,9 +461,7 @@ const sendChatDataTo = (sendFn: (name: string, data: unknown) => void): void => 
 const fetchChatData = async (videoUrl: string): Promise<void> => {
   logger.log(`[fetchChatData] Fetching chat data for: ${videoUrl}`);
   try {
-    logger.log("[fetchChatData] Sending chat-loading(true) message");
     sendToAll("chat-loading", { loading: true });
-    logger.log("[fetchChatData] chat-loading(true) message sent");
 
     // Find yt-dlp executable path
     // The PATH environment in JavaScriptCore might differ from the user's shell,
@@ -498,14 +510,6 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
         videoUrl,
       ],
       tmpDir,
-      (_data: string) => {
-        // Disabled: yt-dlp output logging causes UI thread to become heavy
-        // logger.log(`[DEBUG yt-dlp stdout] ${data}`);
-      },
-      (_data: string) => {
-        // Disabled: yt-dlp output logging causes UI thread to become heavy
-        // logger.log(`[DEBUG yt-dlp stderr] ${data}`);
-      },
     );
 
     if (result.status !== 0) {
@@ -528,38 +532,11 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
 
     // Note: Temporary files in /tmp are left for OS to clean up
 
-    logger.log(`[fetchChatData] Sending chat data in chunks (${chatData.length} total messages)`);
-
-    // Split data into chunks to avoid message size limit
-    const CHUNK_SIZE = 100;
-    const totalChunks = Math.ceil(chatData.length / CHUNK_SIZE);
-
-    logger.log(`[fetchChatData] Total chunks: ${totalChunks}, chunk size: ${CHUNK_SIZE}`);
-
-    for (let i = 0; i < totalChunks; i++) {
-      const start = i * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, chatData.length);
-      const chunk = chatData.slice(start, end);
-
-      sendToAll("chat-data-chunk", {
-        chunk,
-        chunkIndex: i,
-        totalChunks,
-        start,
-        end,
-      });
-
-      if ((i + 1) % 10 === 0 || i === totalChunks - 1) {
-        logger.log(`[fetchChatData] Sent chunk ${i + 1}/${totalChunks} (${start}-${end})`);
-      }
-    }
-
-    // Send completion message
-    sendToAll("chat-data-complete", { totalMessages: chatData.length });
-    logger.log(`[fetchChatData] All chunks sent successfully (${totalChunks} chunks, ${chatData.length} messages)`);
+    // Send chat data to all webviews
+    sendChatDataTo(sendToAll);
+    logger.log(`[fetchChatData] Chat data sent successfully (${chatData.length} messages)`);
 
     sendToAll("chat-loading", { loading: false });
-    logger.log("[fetchChatData] chat-loading(false) message sent successfully");
   } catch (error) {
     logger.error(`[fetchChatData] ERROR: ${error}`);
     sendToAll("chat-error", {
@@ -619,7 +596,6 @@ const onPositionChanged = (): void => {
  * Handle retry-fetch message from sidebar
  */
 const onRetryFetch = (_data: unknown): void => {
-  logger.log("[onRetryFetch] Received retry-fetch message");
   if (currentVideoUrl) {
     fetchChatData(currentVideoUrl);
   }
@@ -633,14 +609,7 @@ const onSidebarReady = (_data: unknown): void => {
   logger.log("[onSidebarReady] Sidebar is ready, sending current state");
 
   // Send current preferences to sidebar only
-  const prefs = getPreferences();
-  sendToSidebar("preferences-update", {
-    maxMessages: prefs.maxMessages,
-    scrollDirection: prefs.scrollDirection,
-    showTimestamp: prefs.showTimestamp,
-    showAuthorName: prefs.showAuthorName,
-    showAuthorPhoto: prefs.showAuthorPhoto,
-  });
+  sendPreferencesTo(sendToSidebar);
 
   if (!currentVideoUrl) {
     return;
@@ -662,14 +631,7 @@ const onStandaloneWindowReady = (_data: unknown): void => {
   isStandaloneWindowReady = true;
 
   // Send current preferences to standalone window only
-  const prefs = getPreferences();
-  standaloneWindow.postMessage("preferences-update", {
-    maxMessages: prefs.maxMessages,
-    scrollDirection: prefs.scrollDirection,
-    showTimestamp: prefs.showTimestamp,
-    showAuthorName: prefs.showAuthorName,
-    showAuthorPhoto: prefs.showAuthorPhoto,
-  });
+  sendPreferencesTo((name, data) => standaloneWindow.postMessage(name, data));
 
   if (!currentVideoUrl) {
     return;
