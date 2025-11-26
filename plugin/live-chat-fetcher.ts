@@ -102,6 +102,7 @@ interface LiveChatGiftRenderer {
   authorName?: { simpleText?: string };
   authorPhoto?: { thumbnails?: Thumbnail[] };
   authorExternalChannelId?: string;
+  timestampUsec?: string;
   header?: {
     liveChatSponsorshipsHeaderRenderer?: {
       primaryText?: { runs?: MessageRunYT[] };
@@ -448,6 +449,7 @@ export class LiveChatFetcher {
         authorBadges: this.parseAuthorBadges(r.authorBadges),
         message: text,
         messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+        timestampText: this.formatTimestampUsec(r.timestampUsec),
       };
     }
 
@@ -466,6 +468,7 @@ export class LiveChatFetcher {
         authorBadges: this.parseAuthorBadges(r.authorBadges),
         message: text || "(Super Chat)",
         messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+        timestampText: this.formatTimestampUsec(r.timestampUsec),
         amount: r.purchaseAmountText?.simpleText,
         colors: this.parseSuperChatColors(r),
       };
@@ -484,6 +487,7 @@ export class LiveChatFetcher {
         authorChannelId: r.authorExternalChannelId,
         authorBadges: this.parseAuthorBadges(r.authorBadges),
         message: "(Super Sticker)",
+        timestampText: this.formatTimestampUsec(r.timestampUsec),
         amount: r.purchaseAmountText?.simpleText,
         stickerUrl: this.getBestThumbnail(r.sticker?.thumbnails),
         colors: {
@@ -509,6 +513,7 @@ export class LiveChatFetcher {
         authorBadges: this.parseAuthorBadges(r.authorBadges),
         message: text || headerText || "(New Member)",
         messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
+        timestampText: this.formatTimestampUsec(r.timestampUsec),
         membershipLevel: headerText || undefined,
       };
     }
@@ -526,6 +531,7 @@ export class LiveChatFetcher {
         authorPhoto: this.getBestThumbnail(r.authorPhoto?.thumbnails),
         authorChannelId: r.authorExternalChannelId,
         message: giftText || "(Gift Membership)",
+        timestampText: this.formatTimestampUsec(r.timestampUsec),
       };
     }
 
@@ -625,6 +631,24 @@ export class LiveChatFetcher {
     if (!thumbnails?.length) return undefined;
     const sorted = [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
     return sorted[0]?.url;
+  }
+
+  /**
+   * Convert timestampUsec (microseconds since epoch) to readable time string (HH:MM:SS)
+   */
+  private formatTimestampUsec(timestampUsec: string | undefined): string | undefined {
+    if (!timestampUsec) return undefined;
+    try {
+      const usec = Number.parseInt(timestampUsec, 10);
+      if (Number.isNaN(usec)) return undefined;
+      const date = new Date(usec / 1000); // Convert microseconds to milliseconds
+      const hours = date.getHours().toString().padStart(2, "0");
+      const minutes = date.getMinutes().toString().padStart(2, "0");
+      const seconds = date.getSeconds().toString().padStart(2, "0");
+      return `${hours}:${minutes}:${seconds}`;
+    } catch {
+      return undefined;
+    }
   }
 
   private colorToHex(colorNum: number | undefined): string | undefined {

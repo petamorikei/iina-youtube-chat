@@ -47,27 +47,32 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
     getItemKey: (index) => displayMessages[index]?.id ?? index, // Stable keys based on message ID
   });
 
-  // Check if scrolled to bottom (within threshold)
-  const checkIfAtBottom = useCallback(() => {
+  // Check if scrolled to the "latest" edge (bottom for bottom-to-top, top for top-to-bottom)
+  const checkIfAtLatestEdge = useCallback(() => {
     const el = parentRef.current;
     if (!el) return true;
-    const threshold = 50; // pixels from bottom to consider "at bottom"
-    const isBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
-    return isBottom;
-  }, []);
+    const threshold = 50; // pixels from edge to consider "at edge"
 
-  // Handle scroll events to track if user is at bottom
+    if (scrollDirection === "top-to-bottom") {
+      // For top-to-bottom, newest is at top, so check if at top
+      return el.scrollTop <= threshold;
+    }
+    // For bottom-to-top, newest is at bottom, so check if at bottom
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+  }, [scrollDirection]);
+
+  // Handle scroll events to track if user is at the latest edge
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
 
     const handleScroll = () => {
-      setIsAtBottom(checkIfAtBottom());
+      setIsAtBottom(checkIfAtLatestEdge());
     };
 
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
-  }, [checkIfAtBottom]);
+  }, [checkIfAtLatestEdge]);
 
   // Auto-scroll to bottom when new messages arrive (if user is at bottom)
   useEffect(() => {
@@ -161,11 +166,12 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
         </div>
       </div>
 
-      {/* Bottom indicator bar - shows when at bottom */}
+      {/* Indicator bar - position depends on scroll direction */}
       <div
         style={{
           position: "absolute",
-          bottom: 0,
+          top: scrollDirection === "top-to-bottom" ? 0 : undefined,
+          bottom: scrollDirection === "bottom-to-top" ? 0 : undefined,
           left: 0,
           right: 0,
           height: "1px",
