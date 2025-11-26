@@ -33,6 +33,9 @@ export const useIINAMessages = () => {
   const expectedChunksRef = useRef<number>(0);
 
   useEffect(() => {
+    console.log("[useIINAMessages] useEffect called, registering message handlers");
+    console.log("[useIINAMessages] iina object:", typeof iina, iina);
+
     // Register separate message handlers for each message type
     iina.onMessage("chat-loading", (data: unknown) => {
       const parseResult = ChatLoadingMessageSchema.safeParse(data);
@@ -145,7 +148,9 @@ export const useIINAMessages = () => {
     });
 
     // Send ready signal to plugin to request current data
+    console.log("[useIINAMessages] About to send sidebar-ready message");
     iina.postMessage("sidebar-ready", {});
+    console.log("[useIINAMessages] sidebar-ready message sent");
   }, []);
 
   const handleRetry = () => {

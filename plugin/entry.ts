@@ -20,21 +20,34 @@ let currentVideoUrl: string | null = null;
 let chatData: ChatMessage[] = [];
 
 /**
- * Read current preferences and send to sidebar
+ * Get current preferences
  */
-const sendPreferencesToSidebar = (): void => {
-  const maxMessages = preferences.get("maxMessages") ?? 200;
-  const scrollDirection = preferences.get("scrollDirection") ?? "bottom-to-top";
-  const showTimestamp = preferences.get("showTimestamp") ?? true;
-  const showAuthorName = preferences.get("showAuthorName") ?? true;
-  const showAuthorPhoto = preferences.get("showAuthorPhoto") ?? true;
+const getPreferences = () => ({
+  maxMessages: (preferences.get("maxMessages") as number | undefined) ?? 200,
+  scrollDirection: (preferences.get("scrollDirection") as string | undefined) ?? "bottom-to-top",
+  showTimestamp: (preferences.get("showTimestamp") as boolean | undefined) ?? true,
+  showAuthorName: (preferences.get("showAuthorName") as boolean | undefined) ?? true,
+  showAuthorPhoto: (preferences.get("showAuthorPhoto") as boolean | undefined) ?? true,
+});
 
-  sidebar.postMessage("preferences-update", {
-    maxMessages,
-    scrollDirection,
-    showTimestamp,
-    showAuthorName,
-    showAuthorPhoto,
+/**
+ * Send message to sidebar
+ */
+const sendToSidebar = (name: string, data: unknown): void => {
+  sidebar.postMessage(name, data);
+};
+
+/**
+ * Send preferences to sidebar
+ */
+const sendPreferences = (): void => {
+  const prefs = getPreferences();
+  sendToSidebar("preferences-update", {
+    maxMessages: prefs.maxMessages,
+    scrollDirection: prefs.scrollDirection,
+    showTimestamp: prefs.showTimestamp,
+    showAuthorName: prefs.showAuthorName,
+    showAuthorPhoto: prefs.showAuthorPhoto,
   });
 };
 
@@ -400,13 +413,37 @@ const parseChatData = (fileContent: string): ChatMessage[] => {
 };
 
 /**
+ * Send chat data to sidebar in chunks
+ */
+const sendChatData = (): void => {
+  const CHUNK_SIZE = 100;
+  const totalChunks = Math.ceil(chatData.length / CHUNK_SIZE);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, chatData.length);
+    const chunk = chatData.slice(start, end);
+
+    sendToSidebar("chat-data-chunk", {
+      chunk,
+      chunkIndex: i,
+      totalChunks,
+      start,
+      end,
+    });
+  }
+
+  sendToSidebar("chat-data-complete", { totalMessages: chatData.length });
+};
+
+/**
  * Fetch chat data using yt-dlp
  */
 const fetchChatData = async (videoUrl: string): Promise<void> => {
   logger.log(`[fetchChatData] Fetching chat data for: ${videoUrl}`);
   try {
     logger.log("[fetchChatData] Sending chat-loading(true) message");
-    sidebar.postMessage("chat-loading", { loading: true });
+    sendToSidebar("chat-loading", { loading: true });
     logger.log("[fetchChatData] chat-loading(true) message sent");
 
     // Find yt-dlp executable path
@@ -499,7 +536,7 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
       const end = Math.min(start + CHUNK_SIZE, chatData.length);
       const chunk = chatData.slice(start, end);
 
-      sidebar.postMessage("chat-data-chunk", {
+      sendToSidebar("chat-data-chunk", {
         chunk,
         chunkIndex: i,
         totalChunks,
@@ -513,18 +550,18 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
     }
 
     // Send completion message
-    sidebar.postMessage("chat-data-complete", { totalMessages: chatData.length });
+    sendToSidebar("chat-data-complete", { totalMessages: chatData.length });
     logger.log(`[fetchChatData] All chunks sent successfully (${totalChunks} chunks, ${chatData.length} messages)`);
 
-    sidebar.postMessage("chat-loading", { loading: false });
+    sendToSidebar("chat-loading", { loading: false });
     logger.log("[fetchChatData] chat-loading(false) message sent successfully");
   } catch (error) {
     logger.error(`[fetchChatData] ERROR: ${error}`);
-    sidebar.postMessage("chat-error", {
+    sendToSidebar("chat-error", {
       message: "Failed to fetch chat data",
       error: String(error),
     });
-    sidebar.postMessage("chat-loading", { loading: false });
+    sendToSidebar("chat-loading", { loading: false });
   }
 };
 
@@ -539,7 +576,7 @@ const onFileLoaded = (): void => {
   }
 
   if (!isYouTubeUrl(url)) {
-    sidebar.postMessage("chat-info", {
+    sendToSidebar("chat-info", {
       message: "This is not a YouTube video",
     });
     return;
@@ -547,7 +584,7 @@ const onFileLoaded = (): void => {
 
   const videoId = extractVideoId(url);
   if (!videoId) {
-    sidebar.postMessage("chat-error", {
+    sendToSidebar("chat-error", {
       message: "Could not extract YouTube video ID",
     });
     return;
@@ -570,7 +607,7 @@ const onPositionChanged = (): void => {
   }
 
   // Send current position to sidebar for timestamp-based filtering
-  sidebar.postMessage("position-update", { position });
+  sendToSidebar("position-update", { position });
 };
 
 /**
@@ -590,15 +627,15 @@ const onRetryFetch = (_data: unknown): void => {
 const onSidebarReady = (_data: unknown): void => {
   logger.log("[onSidebarReady] Sidebar is ready, sending current state");
 
-  // Send current preferences first
-  sendPreferencesToSidebar();
+  // Send current preferences
+  sendPreferences();
 
   if (!currentVideoUrl) {
     return;
   }
 
   if (chatData.length > 0) {
-    sidebar.postMessage("chat-data", { messages: chatData });
+    sendChatData();
   } else {
     fetchChatData(currentVideoUrl);
   }
@@ -606,6 +643,8 @@ const onSidebarReady = (_data: unknown): void => {
 
 // Register event listeners
 event.on("iina.window-loaded", () => {
+  logger.log("[event] iina.window-loaded fired");
+  // Initialize sidebar
   sidebar.loadFile("sidebar/index.html");
   sidebar.onMessage("retry-fetch", onRetryFetch);
   sidebar.onMessage("sidebar-ready", onSidebarReady);
