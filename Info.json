@@ -1,9 +1,9 @@
 {
   "name": "iina-youtube-chat",
   "identifier": "com.petamorikei.iina-youtube-chat",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "ghRepo": "petamorikei/iina-youtube-chat",
-  "ghVersion": 2,
+  "ghVersion": 3,
   "author": {
     "name": "petamorikei"
   },
