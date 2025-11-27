@@ -224,13 +224,119 @@ Add to `tsconfig.json`:
    - Filter chat messages by timestamp
    - Update UI via `postMessage()` when position changes
 
-### Documentation References
+### IINA Plugin Documentation Sitemap
 
-- Plugin Documentation: https://docs.iina.io/
-- Getting Started: https://docs.iina.io/pages/getting-started.html
-- Creating Plugins: https://docs.iina.io/pages/creating-plugins.html
-- Web Views: https://docs.iina.io/pages/webviews.html
-- API Reference: https://docs.iina.io/modules/IINA.API.html
+Base URL: https://docs.iina.io/
+
+**Guides:**
+- Getting Started: `/pages/getting-started.html`
+- Creating Plugins: `/pages/creating-plugins.html`
+- Development Guide: `/pages/dev-guide.html`
+- Global Entry Point: `/pages/global-entry.html`
+- Web Views: `/pages/webviews.html`
+- Subtitle Providers: `/pages/subtitle-providers.html`
+- Plugin Preferences: `/pages/plugin-preferences.html`
+
+**API Modules - Player Control:**
+- `iina.core`: `/interfaces/IINA.API.Core.html`
+- `iina.event`: `/interfaces/IINA.API.Event.html`
+- `iina.mpv`: `/interfaces/IINA.API.MPV.html`
+
+**API Modules - Extended Functionality:**
+- `iina.menu`: `/interfaces/IINA.API.Menu.html`
+- `iina.subtitle`: `/interfaces/IINA.API.Subtitle.html`
+- `iina.playlist`: `/interfaces/IINA.API.Playlist.html`
+- `iina.input`: `/interfaces/IINA.API.Input.html`
+
+**API Modules - User Interfaces:**
+- `iina.overlay`: `/interfaces/IINA.API.Overlay.html`
+- `iina.standaloneWindow`: `/interfaces/IINA.API.StandaloneWindow.html`
+- `iina.sidebar`: `/interfaces/IINA.API.SidebarView.html`
+
+**API Modules - System & Network:**
+- `iina.file`: `/interfaces/IINA.API.File.html`
+- `iina.utils`: `/interfaces/IINA.API.Utils.html`
+- `iina.http`: `/interfaces/IINA.API.HTTP.html`
+- `iina.ws`: `/interfaces/IINA.API.WebSocket.html`
+
+**API Modules - Utilities:**
+- `iina.global`: `/interfaces/IINA.API.Global.html`
+- `iina.console`: `/interfaces/IINA.API.Console.html`
+- `iina.preferences`: `/interfaces/IINA.API.Preferences.html`
+
+### Info.json Structure
+
+**Required Fields:**
+- `name`: Plugin display name
+- `version`: Semantic versioning (major.minor.patch)
+- `identifier`: Reverse domain format (e.g., com.example.myplugin)
+- `author`: Object with `name`, optional `email` and `url`
+- `entry`: Main entry file path
+
+**Optional Fields:**
+- `description`: Short plugin summary
+- `globalEntry`: Global entry file path
+- `preferencesPage`: HTML preferences interface path
+- `preferenceDefaults`: Default preference values object
+- `helpPage`: Help documentation (HTML file or external URL)
+- `subProviders`: Subtitle provider array
+- `sidebarTab`: Object with `name` for sidebar tab
+- `permissions`: Array of required permissions
+- `allowedDomains`: Array of accessible domains (use `["*"]` for all)
+- `ghRepo`: GitHub repository for auto-updates (username/repo format)
+- `ghVersion`: Integer incremented per release for update checking
+
+### Plugin Permissions
+
+Five permission types:
+1. **show-osd**: Display OSD messages via `iina.core.osd()`
+2. **show-alert**: Native alert dialogs through `iina.utils`
+3. **video-overlay**: Draw on video using `iina.overlay` module
+4. **network-request**: Network access via `iina.http` module
+5. **file-system**: File system access or external program execution via `iina.utils.exec()`
+
+### WebView Communication
+
+Webviews run in separate processes and cannot directly access IINA APIs. Communication uses message passing:
+
+**Plugin → WebView:**
+```javascript
+sidebar.postMessage("message-name", { data: "value" });
+```
+
+**WebView → Plugin:**
+```javascript
+iina.postMessage("message-name", { data: "value" });
+```
+
+**Receiving:**
+```javascript
+// Plugin side
+sidebar.onMessage("message-name", (data) => { });
+
+// WebView side
+iina.onMessage("message-name", (data) => { });
+```
+
+**Data Constraints:** Only JSON-serializable objects can be transmitted (no Date, RegExp, Map, Set, Function, Symbol, BigInt, ArrayBuffer, or circular references).
+
+### HTTP API
+
+Requires `network-request` permission in Info.json.
+
+```javascript
+// GET request
+const response = await http.get(url, { headers: { "User-Agent": "IINA" } });
+
+// POST request
+const response = await http.post(url, { headers: {...}, data: {...} });
+
+// Response object
+response.text;       // Response body as string
+response.data;       // Parsed JSON data (if applicable)
+response.statusCode; // HTTP status code
+response.reason;     // Status reason (e.g., "ok" for 200)
+```
 
 ## Plugin Specifications
 

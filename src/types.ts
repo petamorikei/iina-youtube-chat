@@ -22,10 +22,18 @@ export type {
   UserPreferences,
 };
 
+export interface ChatProgress {
+  fetchedMessages: number;
+  currentOffsetMs: number;
+  status: "fetching" | "complete" | "error";
+  message?: string;
+}
+
 export interface AppState {
   loading: boolean;
   error: string | null;
   info: string | null;
+  progress: ChatProgress | null;
   messages: ChatMessage[];
   currentPosition: number | null;
   preferences: UserPreferences;

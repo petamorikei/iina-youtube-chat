@@ -23,7 +23,7 @@ const App = () => {
           padding: "1rem",
         })}
       >
-        {state.loading && <StatusMessage type="loading" message="Loading chat data..." />}
+        {state.loading && <StatusMessage type="loading" message={state.progress?.message || "Loading chat data..."} />}
 
         {state.error && <StatusMessage type="error" message={state.error} onRetry={handleRetry} />}
 

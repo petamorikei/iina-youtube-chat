@@ -1,23 +1,16 @@
 // IINA Plugin Entry Point for YouTube Chat
 // This file runs in IINA's JavaScriptCore context
 
+import { ArchivedChatFetcher } from "./archivedChatFetcher";
 import { LiveChatFetcher, type LiveChatMetadata } from "./liveChatFetcher";
-import {
-  type AuthorBadge,
-  type BadgeType,
-  type ChatMessage,
-  ChatMessageSchema,
-  LiveChatLineSchema,
-  type MessageRun,
-  type MessageType,
-  type SuperChatColors,
-} from "./schemas";
+import type { ChatMessage } from "./schemas";
 
 // Destructure IINA API modules
-const { event, sidebar, standaloneWindow, menu, core, console: logger, utils, file, preferences } = iina;
+const { event, sidebar, standaloneWindow, menu, core, console: logger, utils, preferences, http } = iina;
 
-// Initialize live chat fetcher (uses utils.exec with curl to avoid blocking main thread)
+// Initialize chat fetchers
 const liveChatFetcher = new LiveChatFetcher(utils, logger);
+const archivedChatFetcher = new ArchivedChatFetcher(utils, http, logger);
 
 // Plugin state
 let currentVideoUrl: string | null = null;
@@ -87,345 +80,6 @@ const extractVideoId = (url: string): string | null => {
     }
   }
   return null;
-};
-
-// ============================================================
-// Parser Helper Functions
-// ============================================================
-
-interface YTMessageRun {
-  text?: string;
-  emoji?: {
-    emojiId?: string;
-    shortcuts?: string[];
-    image?: { thumbnails: Array<{ url: string; width?: number; height?: number }> };
-    isCustomEmoji?: boolean;
-  };
-}
-
-interface YTAuthorBadge {
-  liveChatAuthorBadgeRenderer: {
-    icon?: { iconType: string };
-    tooltip?: string;
-    customThumbnail?: { thumbnails: Array<{ url: string }> };
-  };
-}
-
-interface YTThumbnails {
-  thumbnails: Array<{ url: string; width?: number; height?: number }>;
-}
-
-/**
- * Convert YouTube color number to CSS hex string
- */
-const colorToHex = (colorNum: number | undefined): string | undefined => {
-  if (colorNum === undefined) return undefined;
-  // YouTube colors are ARGB format as signed 32-bit integers
-  const unsigned = colorNum >>> 0;
-  const hex = unsigned.toString(16).padStart(8, "0");
-  // Convert ARGB to RGBA CSS format
-  const a = hex.slice(0, 2);
-  const rgb = hex.slice(2);
-  return `#${rgb}${a}`;
-};
-
-/**
- * Get the best thumbnail URL (prefer larger size)
- */
-const getBestThumbnail = (thumbnails: YTThumbnails | undefined): string | undefined => {
-  if (!thumbnails?.thumbnails?.length) return undefined;
-  // Sort by width descending, prefer 64x64
-  const sorted = [...thumbnails.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-  return sorted[0]?.url;
-};
-
-/**
- * Parse author badges from YouTube format
- */
-const parseAuthorBadges = (badges: YTAuthorBadge[] | undefined): AuthorBadge[] | undefined => {
-  if (!badges?.length) return undefined;
-
-  const result: AuthorBadge[] = [];
-
-  for (const badge of badges) {
-    const renderer = badge.liveChatAuthorBadgeRenderer;
-    const iconType = renderer.icon?.iconType?.toLowerCase();
-    const tooltip = renderer.tooltip || "";
-
-    let badgeType: BadgeType | undefined;
-
-    if (iconType === "verified") {
-      badgeType = "verified";
-    } else if (iconType === "owner") {
-      badgeType = "owner";
-    } else if (iconType === "moderator") {
-      badgeType = "moderator";
-    } else if (iconType === "member" || renderer.customThumbnail) {
-      badgeType = "member";
-    }
-
-    if (badgeType) {
-      result.push({
-        type: badgeType,
-        label: tooltip,
-        customIcon: getBestThumbnail(renderer.customThumbnail),
-      });
-    }
-  }
-
-  return result.length > 0 ? result : undefined;
-};
-
-/**
- * Parse message runs from YouTube format to our format
- */
-const parseMessageRuns = (runs: YTMessageRun[] | undefined): { text: string; messageRuns: MessageRun[] } => {
-  if (!runs?.length) {
-    return { text: "", messageRuns: [] };
-  }
-
-  const messageRuns: MessageRun[] = [];
-  let plainText = "";
-
-  for (const run of runs) {
-    if (run.text) {
-      plainText += run.text;
-      messageRuns.push({
-        type: "text",
-        text: run.text,
-      });
-    } else if (run.emoji) {
-      const emojiId = run.emoji.emojiId || "";
-      const shortcut = run.emoji.shortcuts?.[0];
-      const imageUrl = run.emoji.image?.thumbnails?.[0]?.url;
-      const isCustom = run.emoji.isCustomEmoji;
-
-      // For plain text, prefer shortcut, then emojiId
-      plainText += shortcut || emojiId;
-
-      messageRuns.push({
-        type: "emoji",
-        emoji: {
-          emojiId,
-          shortcut,
-          imageUrl,
-          isCustom,
-        },
-      });
-    }
-  }
-
-  return { text: plainText, messageRuns };
-};
-
-/**
- * Parse Super Chat colors
- */
-const parseSuperChatColors = (renderer: {
-  headerBackgroundColor?: number;
-  headerTextColor?: number;
-  bodyBackgroundColor?: number;
-  bodyTextColor?: number;
-  authorNameTextColor?: number;
-}): SuperChatColors | undefined => {
-  const colors: SuperChatColors = {
-    headerBackgroundColor: colorToHex(renderer.headerBackgroundColor),
-    headerTextColor: colorToHex(renderer.headerTextColor),
-    bodyBackgroundColor: colorToHex(renderer.bodyBackgroundColor),
-    bodyTextColor: colorToHex(renderer.bodyTextColor),
-    authorNameTextColor: colorToHex(renderer.authorNameTextColor),
-  };
-
-  // Return undefined if no colors are set
-  const hasColors = Object.values(colors).some((c) => c !== undefined);
-  return hasColors ? colors : undefined;
-};
-
-// ============================================================
-// Main Parser
-// ============================================================
-
-/**
- * Parse chat data from live_chat.json format using Zod schemas
- */
-const parseChatData = (fileContent: string): ChatMessage[] => {
-  const messages: ChatMessage[] = [];
-  const lines = fileContent.split("\n");
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) {
-      continue;
-    }
-
-    try {
-      const jsonData = JSON.parse(line);
-      const parseResult = LiveChatLineSchema.safeParse(jsonData);
-
-      if (!parseResult.success) {
-        // Only log every 100th failure to avoid spam
-        if (i % 100 === 0) {
-          logger.warn(`[parseChatData] Schema validation failed for line ${i + 1}`);
-        }
-        continue;
-      }
-
-      const entry = parseResult.data;
-      const replayAction = entry.replayChatItemAction;
-
-      if (!replayAction?.actions) {
-        continue;
-      }
-
-      const timestamp = replayAction.videoOffsetTimeMsec
-        ? Number(replayAction.videoOffsetTimeMsec) / 1000 // Convert ms to seconds
-        : 0;
-
-      for (const action of replayAction.actions) {
-        const item = action.addChatItemAction?.item;
-        if (!item) continue;
-
-        let chatMessage: ChatMessage | null = null;
-
-        // Handle regular text messages
-        if (item.liveChatTextMessageRenderer) {
-          const r = item.liveChatTextMessageRenderer;
-          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
-
-          if (text || messageRuns.length > 0) {
-            chatMessage = {
-              id: r.id || `${timestamp}-${messages.length}`,
-              type: "text" as MessageType,
-              timestamp,
-              author: r.authorName?.simpleText || "Unknown",
-              authorPhoto: getBestThumbnail(r.authorPhoto),
-              authorChannelId: r.authorExternalChannelId,
-              authorBadges: parseAuthorBadges(r.authorBadges),
-              message: text,
-              messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-              timestampText: r.timestampText?.simpleText,
-            };
-          }
-        }
-
-        // Handle Super Chat (paid messages)
-        if (item.liveChatPaidMessageRenderer) {
-          const r = item.liveChatPaidMessageRenderer;
-          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
-
-          chatMessage = {
-            id: r.id || `${timestamp}-${messages.length}`,
-            type: "superchat" as MessageType,
-            timestamp,
-            author: r.authorName?.simpleText || "Unknown",
-            authorPhoto: getBestThumbnail(r.authorPhoto),
-            authorChannelId: r.authorExternalChannelId,
-            authorBadges: parseAuthorBadges(r.authorBadges),
-            message: text || "(Super Chat)",
-            messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-            timestampText: r.timestampText?.simpleText,
-            amount: r.purchaseAmountText?.simpleText,
-            colors: parseSuperChatColors(r),
-          };
-        }
-
-        // Handle Super Sticker
-        if (item.liveChatPaidStickerRenderer) {
-          const r = item.liveChatPaidStickerRenderer;
-
-          chatMessage = {
-            id: r.id || `${timestamp}-${messages.length}`,
-            type: "supersticker" as MessageType,
-            timestamp,
-            author: r.authorName?.simpleText || "Unknown",
-            authorPhoto: getBestThumbnail(r.authorPhoto),
-            authorChannelId: r.authorExternalChannelId,
-            authorBadges: parseAuthorBadges(r.authorBadges),
-            message: "(Super Sticker)",
-            timestampText: r.timestampText?.simpleText,
-            amount: r.purchaseAmountText?.simpleText,
-            stickerUrl: getBestThumbnail(r.sticker),
-            colors: {
-              bodyBackgroundColor: colorToHex(r.backgroundColor),
-              authorNameTextColor: colorToHex(r.authorNameTextColor),
-            },
-          };
-        }
-
-        // Handle Membership events
-        if (item.liveChatMembershipItemRenderer) {
-          const r = item.liveChatMembershipItemRenderer;
-          const { text: headerText } = parseMessageRuns(r.headerSubtext?.runs);
-          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
-
-          chatMessage = {
-            id: r.id || `${timestamp}-${messages.length}`,
-            type: "membership" as MessageType,
-            timestamp,
-            author: r.authorName?.simpleText || "Unknown",
-            authorPhoto: getBestThumbnail(r.authorPhoto),
-            authorChannelId: r.authorExternalChannelId,
-            authorBadges: parseAuthorBadges(r.authorBadges),
-            message: text || headerText || "(New Member)",
-            messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-            timestampText: r.timestampText?.simpleText,
-            membershipLevel: headerText || undefined,
-          };
-        }
-
-        // Handle Gift Membership
-        if (item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer) {
-          const r = item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer;
-          const { text: giftText } = parseMessageRuns(r.header?.liveChatSponsorshipsHeaderRenderer?.primaryText?.runs);
-
-          chatMessage = {
-            id: r.id || `${timestamp}-${messages.length}`,
-            type: "gift" as MessageType,
-            timestamp,
-            author: r.authorName?.simpleText || "Unknown",
-            authorPhoto: getBestThumbnail(r.authorPhoto),
-            authorChannelId: r.authorExternalChannelId,
-            message: giftText || "(Gift Membership)",
-          };
-        }
-
-        // Handle System/Engagement messages
-        if (item.liveChatViewerEngagementMessageRenderer) {
-          const r = item.liveChatViewerEngagementMessageRenderer;
-          const { text, messageRuns } = parseMessageRuns(r.message?.runs);
-
-          if (text) {
-            chatMessage = {
-              id: r.id || `${timestamp}-${messages.length}`,
-              type: "system" as MessageType,
-              timestamp,
-              author: "YouTube",
-              message: text,
-              messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-            };
-          }
-        }
-
-        // Validate and add message
-        if (chatMessage) {
-          const validationResult = ChatMessageSchema.safeParse(chatMessage);
-          if (validationResult.success) {
-            messages.push(validationResult.data);
-          } else {
-            logger.warn(`[parseChatData] Invalid message structure at line ${i + 1}`);
-          }
-        }
-      }
-    } catch (error) {
-      // Only log every 100th error to avoid spam
-      if (i % 100 === 0) {
-        logger.warn(`[parseChatData] Failed to parse line ${i + 1}: ${error}`);
-      }
-    }
-  }
-
-  logger.log(`[parseChatData] Parsed ${messages.length} messages`);
-  return messages;
 };
 
 /**
@@ -604,7 +258,6 @@ const checkChatAvailability = async (videoUrl: string): Promise<{ available: boo
     const result = await utils.exec(ytdlpPath, ["--dump-json", "--no-download", videoUrl]);
 
     if (result.status !== 0) {
-      logger.warn(`[checkChatAvailability] yt-dlp failed: ${result.stderr}`);
       return { available: false, isLive: false };
     }
 
@@ -613,81 +266,40 @@ const checkChatAvailability = async (videoUrl: string): Promise<{ available: boo
     const subtitles = metadata.subtitles || {};
     const hasChatSubtitle = "live_chat" in subtitles;
 
-    logger.log(`[checkChatAvailability] isLive: ${isLive}, hasChatSubtitle: ${hasChatSubtitle}`);
-
     return { available: hasChatSubtitle || isLive, isLive };
-  } catch (error) {
-    logger.error(`[checkChatAvailability] Error: ${error}`);
+  } catch {
     return { available: false, isLive: false };
   }
 };
 
 /**
- * Download archived chat data using yt-dlp (called after window is already open)
+ * Fetch archived chat data using direct YouTube API (no yt-dlp dependency)
+ * Reports progress during fetch
  */
-const downloadArchivedChatData = async (videoUrl: string): Promise<void> => {
-  logger.log(`[downloadArchivedChatData] Downloading for: ${videoUrl}`);
-
-  const ytdlpPath = findYtdlpPath();
-  const videoId = extractVideoId(videoUrl);
-  if (!videoId) {
-    throw new Error("Could not extract video ID");
-  }
-
-  const tmpDir = "/tmp";
-  const outputTemplate = `${tmpDir}/iina-youtube-chat-${videoId}`;
-  const chatFilePath = `${outputTemplate}.live_chat.json`;
-
-  // Execute yt-dlp to download live chat
-  const result = await utils.exec(
-    ytdlpPath,
-    [
-      "--write-subs",
-      "--sub-lang",
-      "live_chat",
-      "--skip-download",
-      "--extractor-args",
-      "youtube:player_client=default",
-      "-o",
-      outputTemplate,
-      videoUrl,
-    ],
-    tmpDir,
-  );
-
-  if (result.status !== 0) {
-    throw new Error(`yt-dlp failed with status ${result.status}: ${result.stderr}`);
-  }
-
-  if (!file.exists(chatFilePath)) {
-    throw new Error(`Chat file not found: ${chatFilePath}`);
-  }
-
-  const chatFileContent = file.read(chatFilePath);
-  if (!chatFileContent) {
-    throw new Error("Failed to read chat file");
-  }
-
-  chatData = parseChatData(chatFileContent);
-  logger.log(`[downloadArchivedChatData] Parsed ${chatData.length} messages`);
-
-  // Send chat data to all webviews
-  sendChatDataTo(sendToAll);
-};
-
-/**
- * Fetch chat data using yt-dlp (for archived streams)
- */
-const fetchArchivedChatData = async (videoUrl: string): Promise<void> => {
-  logger.log(`[fetchArchivedChatData] Fetching for: ${videoUrl}`);
+const fetchArchivedChatData = async (videoId: string): Promise<void> => {
   try {
     sendToAll("chat-loading", { loading: true });
 
-    await downloadArchivedChatData(videoUrl);
+    const result = await archivedChatFetcher.fetchAllMessages(videoId, (progress) => {
+      // Send progress updates to webviews
+      sendToAll("chat-progress", {
+        fetchedMessages: progress.fetchedMessages,
+        currentOffsetMs: progress.currentOffsetMs,
+        status: progress.status,
+        message: progress.message,
+      });
+    });
 
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+
+    chatData = result.messages;
+
+    // Send chat data to all webviews
+    sendChatDataTo(sendToAll);
     sendToAll("chat-loading", { loading: false });
   } catch (error) {
-    logger.error(`[fetchArchivedChatData] ERROR: ${error}`);
     sendToAll("chat-error", {
       message: "Failed to fetch chat data",
       error: String(error),
@@ -733,15 +345,13 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
   }
 
   // For archived streams: open window immediately, then download in background
-  logger.log("[fetchChatData] Archived chat detected, opening window immediately");
-
   // Auto-open chat window if enabled (before download starts)
   if (getPreferences().autoOpenChatWindow) {
     openStandaloneWindow();
   }
 
-  // Now download chat data in background
-  await fetchArchivedChatData(videoUrl);
+  // Now fetch chat data in background (using videoId for direct API access)
+  await fetchArchivedChatData(videoId);
 };
 
 /**
@@ -752,7 +362,6 @@ const onFileLoaded = (): void => {
   stopLiveChatPolling();
 
   const url = core.status.url;
-
   if (!url) {
     return;
   }
@@ -772,7 +381,6 @@ const onFileLoaded = (): void => {
     return;
   }
 
-  logger.log(`[onFileLoaded] YouTube video detected: ${videoId}`);
   currentVideoUrl = url;
 
   // Fetch chat data

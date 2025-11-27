@@ -25,6 +25,7 @@ export const useIINAMessages = () => {
     loading: true, // Start with loading state until plugin sends actual status
     error: null,
     info: null,
+    progress: null,
     messages: [],
     currentPosition: null,
     preferences: DEFAULT_PREFERENCES,
@@ -46,7 +47,27 @@ export const useIINAMessages = () => {
         return;
       }
       const { loading } = parseResult.data;
-      setState((prev) => ({ ...prev, loading, error: null, info: null }));
+      setState((prev) => ({
+        ...prev,
+        loading,
+        error: null,
+        info: null,
+        progress: loading ? prev.progress : null, // Clear progress when loading ends
+      }));
+    });
+
+    iina.onMessage("chat-progress", (data: unknown) => {
+      // Handle progress updates during chat fetching
+      const progress = data as {
+        fetchedMessages: number;
+        currentOffsetMs: number;
+        status: "fetching" | "complete" | "error";
+        message?: string;
+      };
+      setState((prev) => ({
+        ...prev,
+        progress: progress.status === "complete" ? null : progress,
+      }));
     });
 
     iina.onMessage("chat-data-chunk", (data: unknown) => {

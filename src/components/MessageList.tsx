@@ -19,6 +19,8 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
   const [showScrollButton, setShowScrollButton] = useState(false);
   // Track the last message ID to detect new messages
   const lastMessageIdRef = useRef<string | null>(null);
+  // Track if this is the initial load (to force scroll to latest)
+  const isInitialLoadRef = useRef(true);
 
   // Filter and limit messages based on current position and preferences
   const displayMessages = useMemo(() => {
@@ -84,28 +86,56 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
   useEffect(() => {
     if (displayMessages.length === 0) {
       lastMessageIdRef.current = null;
+      isInitialLoadRef.current = true;
       return;
     }
 
     const currentLastId = displayMessages[displayMessages.length - 1]?.id ?? null;
     const hasNewMessages = currentLastId !== lastMessageIdRef.current;
+    const isInitialLoad = isInitialLoadRef.current;
 
-    // Update ref before potential early return
+    // Update refs before potential early return
     lastMessageIdRef.current = currentLastId;
+    if (isInitialLoad) {
+      isInitialLoadRef.current = false;
+    }
 
-    if (!hasNewMessages) {
+    if (!hasNewMessages && !isInitialLoad) {
       return;
     }
 
-    // Only auto-scroll if user is at the latest edge
-    if (!isAtBottom) {
+    // Force scroll on initial load, or when user is at the latest edge
+    if (!isInitialLoad && !isAtBottom) {
       return;
     }
 
     // Scroll to the latest message
     const targetIndex = scrollDirection === "top-to-bottom" ? 0 : displayMessages.length - 1;
 
-    // Use requestAnimationFrame to ensure DOM is updated
+    // For initial load, wait for virtualizer to render with multiple attempts
+    if (isInitialLoad) {
+      let attempts = 0;
+      const maxAttempts = 10;
+      const scrollInterval = setInterval(() => {
+        attempts++;
+        const totalSize = virtualizer.getTotalSize();
+
+        // Wait until virtualizer has calculated sizes
+        if (totalSize > 0 || attempts >= maxAttempts) {
+          clearInterval(scrollInterval);
+          virtualizer.scrollToIndex(targetIndex, { align: "end" });
+
+          // Additional scroll after items are measured
+          setTimeout(() => {
+            virtualizer.scrollToIndex(targetIndex, { align: "end" });
+          }, 100);
+        }
+      }, 50);
+
+      return () => clearInterval(scrollInterval);
+    }
+
+    // For subsequent updates, use requestAnimationFrame
     requestAnimationFrame(() => {
       virtualizer.scrollToIndex(targetIndex, { align: "end" });
 
