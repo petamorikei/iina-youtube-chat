@@ -133,6 +133,34 @@ const MessageContent = ({
   );
 };
 
+// Get author style based on badges
+const getAuthorStyle = (badges?: AuthorBadge[]): { color: string; backgroundColor?: string } => {
+  // Default gray for regular users (good contrast against #242424 background)
+  const defaultGray = "#a0a0a0";
+
+  if (!badges?.length) {
+    return { color: defaultGray };
+  }
+
+  // Check badges in priority order: owner > moderator > member
+  const hasOwner = badges.some((b) => b.type === "owner");
+  if (hasOwner) {
+    return { color: "#000000", backgroundColor: "#ffd600" }; // Yellow background, black text
+  }
+
+  const hasModerator = badges.some((b) => b.type === "moderator");
+  if (hasModerator) {
+    return { color: "#5e84f1" }; // Blue (moderator color)
+  }
+
+  const hasMember = badges.some((b) => b.type === "member");
+  if (hasMember) {
+    return { color: "#2ba640" }; // Green
+  }
+
+  return { color: defaultGray }; // Default gray (e.g., verified only)
+};
+
 // Get background color based on message type
 const getMessageStyle = (message: ChatMessageType) => {
   switch (message.type) {
@@ -176,7 +204,7 @@ const getMessageStyle = (message: ChatMessageType) => {
         backgroundColor: "#242424",
         color: "#e5e7eb",
         headerColor: "#242424",
-        authorColor: "#60a5fa",
+        authorColor: "#60a5fa", // Will be overridden by getAuthorStyle
       };
   }
 };
@@ -280,14 +308,27 @@ export const ChatMessage = memo(({ message, preferences }: ChatMessageProps) => 
             >
               {showAuthorName && (
                 <>
-                  <span
-                    className={css({
-                      fontWeight: 600,
-                    })}
-                    style={{ color: style.authorColor, fontSize: scaledRem(0.8125) }}
-                  >
-                    {message.author}
-                  </span>
+                  {(() => {
+                    // Use badge-based styling for regular text messages only
+                    const authorStyle =
+                      message.type === "text" ? getAuthorStyle(message.authorBadges) : { color: style.authorColor };
+                    return (
+                      <span
+                        className={css({
+                          fontWeight: 600,
+                        })}
+                        style={{
+                          color: authorStyle.color,
+                          backgroundColor: authorStyle.backgroundColor,
+                          fontSize: scaledRem(0.8125),
+                          padding: authorStyle.backgroundColor ? `0 ${scaledPx(4)}` : undefined,
+                          borderRadius: authorStyle.backgroundColor ? scaledPx(2) : undefined,
+                        }}
+                      >
+                        {message.author}
+                      </span>
+                    );
+                  })()}
                   <AuthorBadges badges={message.authorBadges} iconSize={scaledPx(14)} gap={scaledPx(4)} />
                 </>
               )}
