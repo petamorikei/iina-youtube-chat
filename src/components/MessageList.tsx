@@ -1,7 +1,17 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  iconButton,
+  indicatorBar,
+  messageListRoot,
+  scrollButtonContainer,
+  scrollContainer,
+  virtualItem,
+  virtualListContainer,
+} from "../recipes";
 import type { ChatMessage as ChatMessageType, UserPreferences } from "../types";
 import { ChatMessage } from "./ChatMessage";
+import { Box } from "./ui";
 
 interface MessageListProps {
   messages: ChatMessageType[];
@@ -168,124 +178,69 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div
-      style={{
-        height: "100%",
-        width: "100%",
-        position: "relative",
-      }}
-    >
+    <Box className={messageListRoot()}>
       {/* Scrollable container */}
-      <div
-        ref={parentRef}
-        style={{
-          height: "100%",
-          width: "100%",
-          overflowY: "auto",
-        }}
-      >
+      <Box ref={parentRef} className={scrollContainer()}>
         {/* Virtual list container */}
-        <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {virtualItems.map((virtualItem) => {
-            const message = displayMessages[virtualItem.index];
+        <Box className={virtualListContainer()} style={{ height: `${virtualizer.getTotalSize()}px` }}>
+          {virtualItems.map((virtualItem_) => {
+            const message = displayMessages[virtualItem_.index];
             return (
-              <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
+              <Box
+                key={virtualItem_.key}
+                data-index={virtualItem_.index}
                 ref={virtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualItem.start}px)`,
-                  paddingBottom: "0.5rem",
-                }}
+                className={virtualItem()}
+                style={{ transform: `translateY(${virtualItem_.start}px)` }}
               >
                 <ChatMessage message={message} preferences={preferences} />
-              </div>
+              </Box>
             );
           })}
-        </div>
-      </div>
+        </Box>
+      </Box>
 
       {/* Indicator bar - position depends on scroll direction */}
-      <div
-        style={{
-          position: "absolute",
-          top: scrollDirection === "top-to-bottom" ? 0 : undefined,
-          bottom: scrollDirection === "bottom-to-top" ? 0 : undefined,
-          left: 0,
-          right: 0,
-          height: "1px",
-          background: isAtBottom
-            ? "linear-gradient(90deg, rgba(59, 130, 246, 0.8) 0%, rgba(99, 160, 255, 0.9) 50%, rgba(59, 130, 246, 0.8) 100%)"
-            : "linear-gradient(90deg, rgba(100, 100, 100, 0.3) 0%, rgba(120, 120, 120, 0.4) 50%, rgba(100, 100, 100, 0.3) 100%)",
-          boxShadow: isAtBottom ? "0 0 3px 1px rgba(59, 130, 246, 0.6), 0 0 5px 2px rgba(59, 130, 246, 0.3)" : "none",
-          transition: "all 0.3s ease",
-          pointerEvents: "none",
-          zIndex: 10,
-        }}
+      <Box
+        className={indicatorBar({
+          position: scrollDirection === "top-to-bottom" ? "top" : "bottom",
+          active: isAtBottom,
+        })}
       />
 
       {/* Scroll to latest button - shows when not at latest edge (with 500ms delay) */}
       {showScrollButton && displayMessages.length > 0 && (
-        <button
-          type="button"
-          onClick={scrollToLatest}
-          aria-label="Scroll to latest"
-          style={{
-            position: "absolute",
-            right: "12px",
-            top: scrollDirection === "top-to-bottom" ? "12px" : undefined,
-            bottom: scrollDirection === "bottom-to-top" ? "12px" : undefined,
-            width: "36px",
-            height: "36px",
-            borderRadius: "50%",
-            backgroundColor: "rgba(59, 130, 246, 0.9)",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.3)",
-            transition: "all 0.2s ease",
-            zIndex: 20,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 1)";
-            e.currentTarget.style.transform = "scale(1.1)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 0.9)";
-            e.currentTarget.style.transform = "scale(1)";
-          }}
+        <Box
+          className={scrollButtonContainer({
+            position: scrollDirection === "top-to-bottom" ? "top" : "bottom",
+          })}
         >
-          {/* Arrow icon - decorative, button provides semantic meaning */}
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{
-              transform: scrollDirection === "top-to-bottom" ? "rotate(180deg)" : "none",
-            }}
+          <button
+            type="button"
+            onClick={scrollToLatest}
+            aria-label="Scroll to latest"
+            className={iconButton({ variant: "scroll" })}
           >
-            <path d="M12 5v14M5 12l7 7 7-7" />
-          </svg>
-        </button>
+            {/* Arrow icon - decorative, button provides semantic meaning */}
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              style={{
+                transform: scrollDirection === "top-to-bottom" ? "rotate(180deg)" : "none",
+              }}
+            >
+              <path d="M12 5v14M5 12l7 7 7-7" />
+            </svg>
+          </button>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 };

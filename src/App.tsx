@@ -1,28 +1,14 @@
-import { css } from "../styled-system/css";
 import { MessageList } from "./components/MessageList";
 import { StatusMessage } from "./components/StatusMessage";
+import { Box, Flex } from "./components/ui";
 import { useIINAMessages } from "./hooks/useIINAMessages";
 
 const App = () => {
   const { state, handleRetry } = useIINAMessages();
 
   return (
-    <div
-      className={css({
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        backgroundColor: "#1a1a1a",
-        color: "#ffffff",
-      })}
-    >
-      <div
-        className={css({
-          flex: 1,
-          overflow: "hidden",
-          padding: "1rem",
-        })}
-      >
+    <Flex direction="column" height="100vh" backgroundColor="background" color="white">
+      <Box flex="1" overflow="hidden" padding="1rem">
         {state.loading && <StatusMessage type="loading" message={state.progress?.message || "Loading chat data..."} />}
 
         {state.error && <StatusMessage type="error" message={state.error} onRetry={handleRetry} />}
@@ -40,8 +26,8 @@ const App = () => {
             preferences={state.preferences}
           />
         )}
-      </div>
-    </div>
+      </Box>
+    </Flex>
   );
 };
 
