@@ -19,7 +19,7 @@ const App = () => {
       <div
         className={css({
           flex: 1,
-          overflowY: "auto",
+          overflow: "hidden",
           padding: "1rem",
         })}
       >
