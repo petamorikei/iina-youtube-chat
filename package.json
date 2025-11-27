@@ -27,13 +27,13 @@
     "@biomejs/biome": "2.3.7",
     "@pandacss/dev": "^1.5.1",
     "@types/node": "^24.10.1",
-    "@types/react": "^19.2.5",
+    "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.2.2",
     "globals": "^16.5.0",
     "iina-plugin-definition": "^0.99.3",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.46.4",
+    "typescript-eslint": "^8.48.0",
     "vite": "npm:rolldown-vite@7.2.5"
   }
 }
