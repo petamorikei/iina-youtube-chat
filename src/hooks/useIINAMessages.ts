@@ -159,6 +159,7 @@ export const useIINAMessages = () => {
       setState((prev) => ({
         ...prev,
         messages: [...prev.messages, ...newMessages],
+        loading: false, // Clear loading state when receiving chat
         info: null, // Clear info message when receiving chat
       }));
     });
