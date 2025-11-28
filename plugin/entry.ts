@@ -15,7 +15,6 @@ const archivedChatFetcher = new ArchivedChatFetcher(utils, http, logger);
 // Plugin state
 let currentVideoUrl: string | null = null;
 let chatData: ChatMessage[] = [];
-let chatDataVideoId: string | null = null; // Track which video the chatData belongs to
 let isStandaloneWindowOpen = false;
 let isStandaloneWindowReady = false;
 
@@ -195,7 +194,6 @@ const startLiveChat = async (videoId: string): Promise<boolean> => {
   // Reset state
   liveChatFetcher.resetMessageIndex();
   chatData = [];
-  chatDataVideoId = videoId;
 
   // Fetch metadata
   const metadataResult = await liveChatFetcher.fetchMetadata(videoId);
@@ -297,7 +295,6 @@ const fetchArchivedChatData = async (videoId: string): Promise<void> => {
     }
 
     chatData = result.messages;
-    chatDataVideoId = videoId;
 
     // Send chat data to all webviews
     sendChatDataTo(sendToAll);
@@ -319,6 +316,7 @@ const fetchArchivedChatData = async (videoId: string): Promise<void> => {
  */
 const fetchChatData = async (videoUrl: string): Promise<void> => {
   const videoId = extractVideoId(videoUrl);
+
   if (!videoId) {
     sendToAll("chat-error", { message: "Could not extract video ID" });
     return;
@@ -327,7 +325,10 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
   // Stop any existing live chat polling
   stopLiveChatPolling();
 
-  // First, do a quick metadata check to see if chat is available
+  // Clear previous data and fetch fresh
+  chatData = [];
+
+  // Quick metadata check
   sendToAll("chat-info", { message: "Checking for chat data..." });
   const { available, isLive } = await checkChatAvailability(videoUrl);
 
@@ -338,7 +339,7 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
 
   // Chat is available
   if (isLive) {
-    // For live streams, use live chat API (startLiveChat will auto-open window)
+    // For live streams, always fetch fresh (need to restart polling)
     const handled = await startLiveChat(videoId);
     if (handled) {
       sendToAll("chat-loading", { loading: false });
@@ -361,7 +362,6 @@ const fetchChatData = async (videoUrl: string): Promise<void> => {
  * Handle file loaded event
  */
 const onFileLoaded = (): void => {
-  // Stop any existing live chat polling when file changes
   stopLiveChatPolling();
 
   const url = core.status.url;
@@ -370,23 +370,17 @@ const onFileLoaded = (): void => {
   }
 
   if (!isYouTubeUrl(url)) {
-    sendToAll("chat-info", {
-      message: "This is not a YouTube video",
-    });
+    sendToAll("chat-info", { message: "This is not a YouTube video" });
     return;
   }
 
   const videoId = extractVideoId(url);
   if (!videoId) {
-    sendToAll("chat-error", {
-      message: "Could not extract YouTube video ID",
-    });
+    sendToAll("chat-error", { message: "Could not extract YouTube video ID" });
     return;
   }
 
   currentVideoUrl = url;
-
-  // Fetch chat data
   fetchChatData(url);
 };
 
@@ -417,27 +411,19 @@ const onRetryFetch = (_data: unknown): void => {
  * Send current state when sidebar is ready
  */
 const onSidebarReady = (_data: unknown): void => {
-  logger.log("[onSidebarReady] Sidebar ready");
-  // Send current preferences to sidebar only
   sendPreferencesTo(sendToSidebar);
 
   if (!currentVideoUrl) {
-    // No video loaded yet - clear loading state and show info message
     sendToSidebar("chat-info", { message: "Open a YouTube video to see chat" });
     return;
   }
 
-  const currentVideoId = extractVideoId(currentVideoUrl);
-
-  // Only send chatData if it belongs to the current video
-  if (chatData.length > 0 && chatDataVideoId === currentVideoId) {
+  // Send chat data if available, otherwise show loading (fetch is in progress)
+  if (chatData.length > 0) {
     sendChatDataTo(sendToSidebar);
-  } else if (isLiveStream && chatDataVideoId === currentVideoId) {
-    // Live stream is active but no messages yet - show loading
-    sendToSidebar("chat-loading", { loading: true });
+    sendToSidebar("chat-loading", { loading: false });
   } else {
-    // No chat data for current video yet, fetch it
-    fetchChatData(currentVideoUrl);
+    sendToSidebar("chat-loading", { loading: true });
   }
 };
 
@@ -448,25 +434,20 @@ const onSidebarReady = (_data: unknown): void => {
 const onStandaloneWindowReady = (_data: unknown): void => {
   isStandaloneWindowReady = true;
 
-  // Send current preferences to standalone window only
   sendPreferencesTo((name, data) => standaloneWindow.postMessage(name, data));
 
   if (!currentVideoUrl) {
-    // No video loaded yet - clear loading state and show info message
     standaloneWindow.postMessage("chat-info", { message: "Open a YouTube video to see chat" });
     return;
   }
 
-  const currentVideoId = extractVideoId(currentVideoUrl);
-
-  // Only send chatData if it belongs to the current video
-  if (chatData.length > 0 && chatDataVideoId === currentVideoId) {
+  // Send chat data if available, otherwise show loading (fetch is in progress)
+  if (chatData.length > 0) {
     sendChatDataTo((name, data) => standaloneWindow.postMessage(name, data));
+    standaloneWindow.postMessage("chat-loading", { loading: false });
   } else {
-    // Video is loading but chat data not yet available - show loading state
     standaloneWindow.postMessage("chat-loading", { loading: true });
   }
-  // Note: Don't fetch chat data again; sidebar already handles this
 };
 
 /**
@@ -474,14 +455,10 @@ const onStandaloneWindowReady = (_data: unknown): void => {
  */
 const openStandaloneWindow = (): void => {
   if (isStandaloneWindowOpen) {
-    return; // Already open
+    return;
   }
 
-  // Load the HTML file first
   standaloneWindow.loadFile("dist/sidebar/index.html");
-
-  // Register message handlers AFTER loadFile
-  // This ensures handlers are active for the newly loaded webview
   standaloneWindow.onMessage("retry-fetch", onRetryFetch);
   standaloneWindow.onMessage("sidebar-ready", onStandaloneWindowReady);
 
@@ -512,13 +489,10 @@ const toggleStandaloneWindow = (): void => {
 
 // Register event listeners
 event.on("iina.window-loaded", () => {
-  logger.log("[event] iina.window-loaded");
-  // Initialize sidebar
   sidebar.loadFile("dist/sidebar/index.html");
   sidebar.onMessage("retry-fetch", onRetryFetch);
   sidebar.onMessage("sidebar-ready", onSidebarReady);
 
-  // Add menu item to toggle standalone chat window
   const chatWindowMenuItem = menu.item("Open Chat Window", toggleStandaloneWindow);
   menu.addItem(chatWindowMenuItem);
 });
