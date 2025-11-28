@@ -15,6 +15,7 @@ const archivedChatFetcher = new ArchivedChatFetcher(utils, http, logger);
 // Plugin state
 let currentVideoUrl: string | null = null;
 let chatData: ChatMessage[] = [];
+let chatDataVideoId: string | null = null; // Track which video the chatData belongs to
 let isStandaloneWindowOpen = false;
 let isStandaloneWindowReady = false;
 
@@ -194,6 +195,7 @@ const startLiveChat = async (videoId: string): Promise<boolean> => {
   // Reset state
   liveChatFetcher.resetMessageIndex();
   chatData = [];
+  chatDataVideoId = videoId;
 
   // Fetch metadata
   const metadataResult = await liveChatFetcher.fetchMetadata(videoId);
@@ -295,6 +297,7 @@ const fetchArchivedChatData = async (videoId: string): Promise<void> => {
     }
 
     chatData = result.messages;
+    chatDataVideoId = videoId;
 
     // Send chat data to all webviews
     sendChatDataTo(sendToAll);
@@ -424,13 +427,16 @@ const onSidebarReady = (_data: unknown): void => {
     return;
   }
 
-  if (chatData.length > 0) {
+  const currentVideoId = extractVideoId(currentVideoUrl);
+
+  // Only send chatData if it belongs to the current video
+  if (chatData.length > 0 && chatDataVideoId === currentVideoId) {
     sendChatDataTo(sendToSidebar);
-  } else if (isLiveStream) {
+  } else if (isLiveStream && chatDataVideoId === currentVideoId) {
     // Live stream is active but no messages yet - show loading
     sendToSidebar("chat-loading", { loading: true });
   } else {
-    // No chat data yet, fetch it
+    // No chat data for current video yet, fetch it
     fetchChatData(currentVideoUrl);
   }
 };
@@ -451,7 +457,10 @@ const onStandaloneWindowReady = (_data: unknown): void => {
     return;
   }
 
-  if (chatData.length > 0) {
+  const currentVideoId = extractVideoId(currentVideoUrl);
+
+  // Only send chatData if it belongs to the current video
+  if (chatData.length > 0 && chatDataVideoId === currentVideoId) {
     sendChatDataTo((name, data) => standaloneWindow.postMessage(name, data));
   } else {
     // Video is loading but chat data not yet available - show loading state
