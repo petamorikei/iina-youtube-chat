@@ -159,7 +159,7 @@ pnpm check
 │   ├── components/
 │   ├── hooks/
 │   └── schemas.ts    # Zod schemas (shared message types)
-└── dist/             # Build output (committed for GitHub distribution)
+└── dist/             # Build output (not committed; built by `mise run build` / the release workflow)
 ```
 
 ### Development Plugin Linking

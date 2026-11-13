@@ -84,7 +84,7 @@ src/                  # React webview UI (sidebar and standalone window)
   ├── hooks/          # useIINAMessages (plugin ↔ webview messaging)
   ├── recipes/        # Panda CSS recipes
   └── schemas.ts      # Zod schemas for plugin messages (types also used by plugin/)
-dist/                 # Build output (committed for GitHub distribution)
+dist/                 # Build output (not committed; built by `mise run build` / the release workflow)
 
 styled-system/        # Auto-generated Panda CSS files (do not edit manually)
 ```

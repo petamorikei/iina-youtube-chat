@@ -26,5 +26,8 @@ dist-ssr
 styled-system
 styled-system-studio
 
+## Build output (published only inside the release package)
+dist/
+
 ## Packages built by `mise run pack`
 out/
