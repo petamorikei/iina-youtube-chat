@@ -11,7 +11,10 @@ export default defineConfig({
     },
     outDir: "dist",
     emptyOutDir: false,
-    rollupOptions: {
+    // IINA runs the plugin script in the system JavaScriptCore; keep the syntax level of earlier builds
+    // (optional chaining is fine, class fields are lowered to constructor assignments)
+    target: "safari13.1",
+    rolldownOptions: {
       output: {
         // Ensure the IIFE assigns to the global scope without wrapping
         extend: true,

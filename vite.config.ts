@@ -18,7 +18,7 @@ export default defineConfig({
     outDir: "dist/sidebar",
     emptyOutDir: false,
     target: "es2015", // Target older browsers (ES2015/ES6)
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         format: "iife", // Output as IIFE (Immediately Invoked Function Expression)
         entryFileNames: "assets/[name].js",
