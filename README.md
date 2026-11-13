@@ -2,7 +2,7 @@
 
 Display YouTube live chat and archived stream chat synchronized with video playback in IINA.
 
-![IINA](https://img.shields.io/badge/IINA-1.4.0+-blue)
+![IINA](https://img.shields.io/badge/IINA-1.4+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ![Screenshot](./screenshot.png)
@@ -18,7 +18,7 @@ Display YouTube live chat and archived stream chat synchronized with video playb
 
 ### Requirements
 
-- [IINA](https://iina.io/) 1.4.0 or later
+- [IINA](https://iina.io/) 1.4 or later (tested with IINA 1.5.1)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) (required for both live and archived stream chat)
 
 ### Installing yt-dlp
@@ -76,14 +76,14 @@ The standalone window is useful when you want to keep chat visible while hiding 
 
 Configure via IINA Settings → Plugins → YouTube Chat
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Maximum messages | Max number of messages to display (0 = unlimited; live streams then keep every message in memory) | 200 |
-| Scroll direction | Chat scroll direction | Bottom to top |
-| Show timestamp | Display message timestamps | ON |
-| Show author name | Display author names | ON |
-| Show author photo | Display author profile photos | ON |
-| Auto-open chat window | Automatically open chat window for YouTube streams | ON |
+| Setting               | Description                                                                                       | Default       |
+| --------------------- | ------------------------------------------------------------------------------------------------- | ------------- |
+| Maximum messages      | Max number of messages to display (0 = unlimited; live streams then keep every message in memory) | 200           |
+| Scroll direction      | Chat scroll direction                                                                             | Bottom to top |
+| Show timestamp        | Display message timestamps                                                                        | ON            |
+| Show author name      | Display author names                                                                              | ON            |
+| Show author photo     | Display author profile photos                                                                     | ON            |
+| Auto-open chat window | Automatically open chat window for YouTube streams                                                | ON            |
 
 ## Supported Message Types
 
@@ -116,19 +116,21 @@ brew install yt-dlp
 
 ### Tech Stack
 
-- **React 19** + **TypeScript 5.9**
+- **React 19** + **TypeScript 7**
 - **Vite 8** - Build tool
 - **Panda CSS** - Styling
 - **TanStack Virtual** - Virtual scrolling
 - **Zod** - Schema validation
-- **Biome** - Formatter/Linter
+- **Biome** - Formatter/Linter (functions are arrow functions only)
+- **Vitest** - Unit tests (`test/`)
+- **prek** - Pre-commit checks
 
 ### Setup
 
-Tool versions (Node.js, pnpm) are managed with [mise](https://mise.jdx.dev/) via `mise.toml`.
+Tool versions (Node.js, pnpm, prek) are managed with [mise](https://mise.jdx.dev/) via `mise.toml`.
 
 ```bash
-# Install Node.js and pnpm
+# Install Node.js, pnpm and prek
 mise install
 
 # Install dependencies
@@ -140,8 +142,11 @@ pnpm dev
 # Build
 pnpm build
 
-# Code quality check
-pnpm check
+# Lint, type-check and unit tests
+mise run check
+
+# Apply Biome fixes and formatting
+mise run fix
 ```
 
 ### Project Structure

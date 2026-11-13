@@ -7,16 +7,22 @@
   "formatter": {
     "enabled": true,
     "lineWidth": 120,
-    "indentStyle": "space"
+    "indentStyle": "space",
+    "formatWithErrors": true
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "complexity": {
-        "noExcessiveCognitiveComplexity": "off"
+        "noExcessiveCognitiveComplexity": "off",
+        "useArrowFunction": "error"
+      },
+      "nursery": {
+        "useConsistentFunctionStyle": { "level": "error", "options": { "style": "expression" } }
       },
       "correctness": {
+        "noNodejsModules": "off",
         "useImportExtensions": "off",
         "noUndeclaredDependencies": "off"
       },
@@ -48,5 +54,11 @@
     "enabled": true,
     "clientKind": "git",
     "useIgnoreFile": true
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["test/**"],
+      "linter": { "rules": { "style": { "noNonNullAssertion": "off" } } }
+    }
+  ]
 }

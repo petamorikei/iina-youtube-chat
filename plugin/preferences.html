@@ -16,6 +16,17 @@
       margin-bottom: 4px;
       font-weight: 500;
     }
+    /* Option groups are <fieldset>s for accessibility; keep them looking like the other sections */
+    fieldset.pref-section {
+      border: 0;
+      padding: 0;
+      margin-left: 0;
+      margin-right: 0;
+      min-width: 0;
+    }
+    legend.pref-label {
+      padding: 0;
+    }
     .pref-input {
       width: 100px;
     }
@@ -58,9 +69,10 @@
 </head>
 <body>
   <div class="pref-section">
-    <label class="pref-label">Maximum messages</label>
+    <label class="pref-label" for="maxMessagesInput">Maximum messages</label>
     <input
       type="number"
+      id="maxMessagesInput"
       class="pref-input"
       data-type="int"
       data-pref-key="maxMessages"
@@ -73,7 +85,7 @@
   </div>
 
   <div class="pref-section">
-    <label class="pref-label">Font scale</label>
+    <label class="pref-label" for="fontScaleRange">Font scale</label>
     <div class="range-group">
       <input
         type="range"
@@ -91,8 +103,8 @@
     </p>
   </div>
 
-  <div class="pref-section">
-    <label class="pref-label">Scroll direction</label>
+  <fieldset class="pref-section">
+    <legend class="pref-label">Scroll direction</legend>
     <div class="radio-group">
       <label>
         <input type="radio" name="scrollDirection" data-pref-key="scrollDirection" value="bottom-to-top" />
@@ -103,10 +115,10 @@
         Top to bottom (newest at top)
       </label>
     </div>
-  </div>
+  </fieldset>
 
-  <div class="pref-section">
-    <label class="pref-label">Display options</label>
+  <fieldset class="pref-section">
+    <legend class="pref-label">Display options</legend>
     <div class="checkbox-group">
       <label>
         <input type="checkbox" data-type="bool" data-pref-key="showTimestamp" />
@@ -121,17 +133,17 @@
         Show author photo
       </label>
     </div>
-  </div>
+  </fieldset>
 
-  <div class="pref-section">
-    <label class="pref-label">Behavior</label>
+  <fieldset class="pref-section">
+    <legend class="pref-label">Behavior</legend>
     <div class="checkbox-group">
       <label>
         <input type="checkbox" data-type="bool" data-pref-key="autoOpenChatWindow" />
         Auto-open chat window for YouTube streams
       </label>
     </div>
-  </div>
+  </fieldset>
 
   <p class="small secondary" style="margin-top: 24px; color: #888;">
     Note: Some settings require reloading the plugin to take effect.
@@ -142,9 +154,9 @@
     const fontScaleRange = document.getElementById('fontScaleRange');
     const fontScaleValue = document.getElementById('fontScaleValue');
 
-    function updateFontScaleDisplay() {
+    const updateFontScaleDisplay = () => {
       fontScaleValue.textContent = `${fontScaleRange.value}%`;
-    }
+    };
 
     fontScaleRange.addEventListener('input', updateFontScaleDisplay);
 

@@ -15,7 +15,8 @@
     "check": "biome check --write .",
     "preview": "vite preview",
     "preinstall": "npx only-allow pnpm",
-    "prepare": "panda codegen"
+    "prepare": "panda codegen && mise exec -- prek install",
+    "test": "vitest"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
@@ -24,14 +25,15 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.3.7",
+    "@biomejs/biome": "2.6.7",
     "@pandacss/dev": "^1.5.1",
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.3.3",
     "iina-plugin-definition": "^0.99.3",
-    "typescript": "~5.9.3",
-    "vite": "^8.3.8"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
   }
 }

@@ -1,3 +1,7 @@
 allowBuilds:
-  '@swc/core': true
+  "@swc/core": true
   esbuild: true
+peerDependencyRules:
+  allowedVersions:
+    # Optional peer of tsconfig parsing in Panda CSS (via @pandacss/node); the project uses TypeScript 7.
+    tsconfck>typescript: "7"
