@@ -38,6 +38,25 @@ pnpm prepare
 ```
 Generates Panda CSS style system code. This runs automatically after `pnpm install`.
 
+### Tasks (mise)
+`mise run build`, `mise run check` (Biome + `tsc -b`), `mise run link` / `unlink`, `mise run pack`
+(`out/iina-youtube-chat-<version>.iinaplgz`), `mise run release:verify`.
+
+## Distribution and Naming
+
+- Releases are published by GitHub Actions (`.github/workflows/release.yml`) when a `v<version>` tag is pushed.
+  The workflow builds `dist/` and attaches `iina-youtube-chat-<version>.iinaplgz` to the GitHub release. IINA's
+  "Install from GitHub" and its update check use that package; the update check compares `ghVersion` in `Info.json` on
+  `main` with the installed one.
+- To release: raise `version` in `package.json` and `Info.json` together, increase `ghVersion` by one, push to `main`,
+  then push the tag.
+- Naming convention shared with the author's other IINA plugins (e.g. iina-scrobbler):
+  - Repository and package name: `iina-<name>`
+  - Identifier: `io.github.petamorikei.iina-<name>`. Never change it: IINA refuses an update whose identifier
+    differs, and settings are stored per identifier.
+  - Display name (`Info.json` `name`): human-readable, without "IINA" (here: `YouTube Chat`)
+  - Package file: `iina-<name>-<version>.iinaplgz`
+
 ## Architecture
 
 ### Tech Stack

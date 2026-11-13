@@ -25,3 +25,6 @@ dist-ssr
 ## Panda
 styled-system
 styled-system-studio
+
+## Packages built by `mise run pack`
+out/

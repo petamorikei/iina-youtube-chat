@@ -1,3 +1,67 @@
 [tools]
 node = "26"
 pnpm = "12"
+
+[env]
+IINA_APP = "/Applications/IINA.app"
+
+[tasks.install]
+description = "Install dependencies (also runs panda codegen)"
+run = "pnpm install"
+sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]
+outputs = ["node_modules/.modules.yaml"]
+
+[tasks.build]
+description = "Type-check and build the plugin and the chat UI into dist/"
+depends = ["install"]
+run = "pnpm build"
+
+[tasks.lint]
+description = "Lint and check formatting (Biome), without changing files"
+depends = ["install"]
+run = "pnpm exec biome check ."
+
+[tasks.check]
+description = "Lint and type-check"
+depends = ["install"]
+run = ["pnpm exec biome check .", "pnpm exec tsc -b"]
+
+[tasks.link]
+description = "Link this folder into IINA as a development plugin"
+run = '"$IINA_APP/Contents/MacOS/iina-plugin" link .'
+
+[tasks.unlink]
+description = "Remove the development plugin link from IINA"
+run = '"$IINA_APP/Contents/MacOS/iina-plugin" unlink .'
+
+[tasks.pack]
+description = "Build and package the plugin as out/iina-youtube-chat-<version>.iinaplgz"
+depends = ["build"]
+# An .iinaplgz is a plain zip with Info.json at its root (IINA unzips it into the
+# plugins folder), so zip is used instead of IINA's iina-plugin CLI: the same task
+# then runs on the Linux release runner. The file is named after the repository
+# (package.json "name"), not the display name, so renaming the plugin keeps it stable.
+run = '''
+set -euo pipefail
+name=$(node -p 'require("./package.json").name')
+version=$(node -p 'require("./Info.json").version')
+rm -rf out/stage
+rm -f out/*.iinaplgz
+mkdir -p out/stage
+cp -R Info.json dist LICENSE README.md out/stage/
+(cd out/stage && zip -qrX "../${name}-${version}.iinaplgz" .)
+rm -rf out/stage
+ls -l out/*.iinaplgz
+'''
+
+[tasks."release:verify"]
+description = "Check that package.json, Info.json and the release tag agree on the version"
+run = '''
+set -euo pipefail
+pkg=$(node -p 'require("./package.json").version')
+info=$(node -p 'require("./Info.json").version')
+[ "$pkg" = "$info" ] || { echo "package.json ($pkg) and Info.json ($info) versions differ"; exit 1; }
+tag="${GITHUB_REF_NAME:-v$info}"
+[ "$tag" = "v$info" ] || { echo "tag $tag does not match version $info"; exit 1; }
+echo "version $info (ghVersion $(node -p 'require("./Info.json").ghVersion'))"
+'''

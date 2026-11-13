@@ -35,6 +35,16 @@ brew install yt-dlp
 1. Select **"Install from GitHub..."**
 1. Enter `petamorikei/iina-youtube-chat` and click **Install**
 
+IINA installs the package attached to the [latest release](https://github.com/petamorikei/iina-youtube-chat/releases/latest)
+and checks for updates later. You can also download `iina-youtube-chat-<version>.iinaplgz` from the release page and
+open it.
+
+### Upgrading from 0.7.x or earlier
+
+Version 0.8.0 changed the plugin's identifier (to `io.github.petamorikei.iina-youtube-chat`) and its name (to
+**YouTube Chat**), so IINA cannot update older installations automatically. Remove the old **iina-youtube-chat** plugin
+in **Settings** → **Plugins**, then install again as above. Settings return to their defaults.
+
 ## Usage
 
 Open a YouTube video in IINA, then display chat using one of the following methods:
@@ -47,7 +57,7 @@ Open a YouTube video in IINA, then display chat using one of the following metho
 
 ### Option 2: Standalone Window
 
-1. Go to **Plugin** menu → **iina-youtube-chat** → **Open Chat Window**
+1. Go to **Plugin** menu → **YouTube Chat** → **Open Chat Window**
 1. A separate chat window will open
 
 The standalone window is useful when you want to keep chat visible while hiding the sidebar, or position it anywhere on your screen.
@@ -64,7 +74,7 @@ The standalone window is useful when you want to keep chat visible while hiding 
 
 ## Settings
 
-Configure via IINA Settings → Plugins → iina-youtube-chat
+Configure via IINA Settings → Plugins → YouTube Chat
 
 | Setting | Description | Default |
 |---------|-------------|---------|
@@ -155,19 +165,25 @@ pnpm check
 ### Development Plugin Linking
 
 ```bash
-# Symlink plugin to IINA (from project root)
-iina-plugin link .
-
-# Unlink
-iina-plugin unlink .
+mise run link     # symlink this folder into IINA as a development plugin
+mise run unlink   # remove the link
 ```
+
+Remove an installed release of the plugin first; IINA refuses two plugins with the same identifier.
 
 ### Packaging
 
 ```bash
-# Generate .iinaplgz file
-iina-plugin pack .
+mise run pack     # out/iina-youtube-chat-<version>.iinaplgz (Info.json, dist/, LICENSE, README.md)
 ```
+
+### Releasing
+
+1. Raise `version` in `package.json` and `Info.json` (same value), and increase `ghVersion` in `Info.json` by one.
+   IINA offers an update when `ghVersion` on `main` is higher than the installed one.
+2. Commit, push to `main`, then push a tag `v<version>` (for example `v0.9.0`).
+3. The [Release workflow](.github/workflows/release.yml) checks the versions, lints, type-checks, builds and publishes
+   the release with the `.iinaplgz` attached.
 
 ## License
 

@@ -1,11 +1,12 @@
 {
-  "name": "iina-youtube-chat",
-  "identifier": "com.petamorikei.iina-youtube-chat",
-  "version": "0.7.0",
+  "name": "YouTube Chat",
+  "identifier": "io.github.petamorikei.iina-youtube-chat",
+  "version": "0.8.0",
   "ghRepo": "petamorikei/iina-youtube-chat",
-  "ghVersion": 7,
+  "ghVersion": 8,
   "author": {
-    "name": "petamorikei"
+    "name": "petamorikei",
+    "url": "https://github.com/petamorikei"
   },
   "description": "Display YouTube live chat synchronized with video playback",
   "entry": "dist/main.js",
