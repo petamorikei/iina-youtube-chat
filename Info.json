@@ -1,9 +1,9 @@
 {
   "name": "YouTube Chat",
   "identifier": "io.github.petamorikei.iina-youtube-chat",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "ghRepo": "petamorikei/iina-youtube-chat",
-  "ghVersion": 8,
+  "ghVersion": 9,
   "author": {
     "name": "petamorikei",
     "url": "https://github.com/petamorikei"
