@@ -115,7 +115,12 @@ brew install yt-dlp
 
 ### Setup
 
+Tool versions (Node.js, pnpm) are managed with [mise](https://mise.jdx.dev/) via `mise.toml`.
+
 ```bash
+# Install Node.js and pnpm
+mise install
+
 # Install dependencies
 pnpm install
 

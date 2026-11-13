@@ -88,11 +88,12 @@ Biome handles both formatting and linting with:
 
 ## Development Workflow
 
-1. **Install dependencies**: `pnpm install` (enforced by preinstall hook)
-2. **Start dev server**: `pnpm dev`
-3. **Make changes**: Edit files in `src/`
-4. **Format/lint**: `pnpm check` (auto-fixes most issues)
-5. **Build**: `pnpm build` (TypeScript check + Vite build)
+1. **Install tools**: `mise install` (Node.js and pnpm versions are defined in `mise.toml`)
+2. **Install dependencies**: `pnpm install` (enforced by preinstall hook)
+3. **Start dev server**: `pnpm dev`
+4. **Make changes**: Edit files in `src/`
+5. **Format/lint**: `pnpm check` (auto-fixes most issues)
+6. **Build**: `pnpm build` (TypeScript check + Vite build)
 
 ## Code Style Guidelines
 
