@@ -43,19 +43,29 @@ Generates Panda CSS style system code. This runs automatically after `pnpm insta
 ### Tech Stack
 - **React 19.2.0**: UI framework with StrictMode enabled
 - **TypeScript 5.9.3**: Type-safe development with strict mode
-- **Vite (rolldown-vite 7.2.5)**: Build tool using Rolldown bundler
+- **Vite 8**: Build tool (Rolldown bundler)
 - **Panda CSS**: Utility-first CSS-in-JS with generated `styled-system/`
 - **Biome**: Fast formatter and linter (replaces ESLint/Prettier)
 - **SWC**: Fast TypeScript/React transformation via `@vitejs/plugin-react-swc`
 
 ### Project Structure
 ```
-src/
+Info.json             # Plugin metadata (at root for GitHub distribution)
+plugin/               # IINA plugin script (runs in IINA's JavaScriptCore context)
+  ├── entry.ts              # Main entry: events, state, webview messaging
+  ├── archivedChatFetcher.ts # Archived chat via YouTube internal API (parallel fetch)
+  ├── liveChatFetcher.ts    # Live chat polling via curl
+  ├── chatItemParser.ts     # Chat item → ChatMessage parsing shared by both fetchers
+  ├── youtubeUrl.ts         # YouTube URL detection / video ID extraction
+  └── preferences.html      # Plugin preferences page
+src/                  # React webview UI (sidebar and standalone window)
   ├── main.tsx        # React app entry point
   ├── App.tsx         # Main App component
-  ├── App.css         # Component styles
-  ├── index.css       # Global styles
-  └── assets/         # Static assets (images, etc.)
+  ├── components/     # UI components (MessageList, ChatMessage, StatusMessage)
+  ├── hooks/          # useIINAMessages (plugin ↔ webview messaging)
+  ├── recipes/        # Panda CSS recipes
+  └── schemas.ts      # Zod schemas for plugin messages (types also used by plugin/)
+dist/                 # Build output (committed for GitHub distribution)
 
 styled-system/        # Auto-generated Panda CSS files (do not edit manually)
 ```
@@ -218,7 +228,7 @@ Add to `tsconfig.json`:
    - Runs in overlay/sidebar webview
    - Receives chat messages via `iina.onMessage()`
    - Displays chat synchronized with video position
-   - Handles light/dark mode via `prefers-color-scheme`
+   - Uses a fixed dark theme (light mode is intentionally not supported)
 
 3. **Sync Mechanism**:
    - Listen to `mpv.time-pos.changed` events
@@ -345,20 +355,20 @@ This section defines the finalized specifications for the YouTube chat plugin im
 
 ### 1. Data Acquisition
 
-**Method**: yt-dlp
-**Target**: Archived livestream chat data
-**Behavior**: Fetch complete chat history in a single request to JSON file
-**Command**: `yt-dlp --write-subs --sub-langs live_chat --skip-download [URL]`
-**Output**: `[VIDEO_ID].live_chat.json` containing all messages with timestamps
+**Availability check**: yt-dlp (`yt-dlp --dump-json --no-download https://www.youtube.com/watch?v=[VIDEO_ID]`)
+- `is_live` decides live vs archived; a `live_chat` subtitle entry means archived chat exists
+- yt-dlp is a required runtime dependency
 
-**Future Phase 2**:
-- Live streaming support (during broadcast)
-- YouTube official API integration
+**Archived streams**: `archivedChatFetcher.ts` fetches the full chat history directly from YouTube's internal
+`get_live_chat_replay` API (ported from yt-dlp's `youtube_live_chat.py`), split into parallel segments by video offset.
+
+**Live streams**: `liveChatFetcher.ts` polls YouTube's internal `get_live_chat` API via `curl`.
+
+**Future**: YouTube official API integration
 
 ### 2. Supported Video Types
 
-**Initial Implementation**: Archived livestreams only
-**Future**: Live broadcasts, YouTube official API approach
+Archived livestreams and live broadcasts.
 
 ### 3. Chat Display UI
 
@@ -380,14 +390,14 @@ This section defines the finalized specifications for the YouTube chat plugin im
 **Pause Behavior**: Chat also pauses
 
 **Configuration Settings**:
-- `maxMessages`: Number of messages to display (0 = unlimited, default: 50)
+- `maxMessages`: Number of messages to display (0 = unlimited, default: 200)
 - `scrollDirection`: `bottom-to-top` or `top-to-bottom` (default: `bottom-to-top`)
 
 ### 5. Performance and Data Management
 
 **Data Fetch Timing**: Automatically on video load
 **Cache Strategy**: No cache initially (future feature)
-**Memory Management**: Hold all chat data in memory (acceptable for normal streams)
+**Memory Management**: Archived streams hold all chat data in memory (needed for seeking). Live streams keep only the latest `maxMessages` messages, or all of them when `maxMessages` is 0 (unlimited is a user-accepted memory trade-off)
 **Virtual Scrolling**: TanStack Virtual (research https://tanstack.com/virtual/latest before implementation)
 **Optimization Techniques**:
 - React memoization for message components
@@ -395,32 +405,20 @@ This section defines the finalized specifications for the YouTube chat plugin im
 
 ### 6. User Settings
 
-Implementation via IINA standard UI (`Info.json` preferences):
+Implemented as an HTML preferences page (`plugin/preferences.html`, `preferencesPage` in `Info.json`).
+Defaults are defined in `Info.json` `preferenceDefaults`:
 
-```json
-"preferences": [
-  {
-    "key": "maxMessages",
-    "type": "number",
-    "title": "Maximum messages",
-    "description": "Number of chat messages to display (0 = unlimited)",
-    "default": 50,
-    "min": 0
-  },
-  {
-    "key": "scrollDirection",
-    "type": "menu",
-    "title": "Scroll direction",
-    "options": [
-      {"title": "Bottom to top", "value": "bottom-to-top"},
-      {"title": "Top to bottom", "value": "top-to-bottom"}
-    ],
-    "default": "bottom-to-top"
-  }
-]
-```
+| Key | Default |
+|-----|---------|
+| `maxMessages` | 200 (0 = unlimited) |
+| `scrollDirection` | `bottom-to-top` |
+| `showTimestamp` | `true` |
+| `showAuthorName` | `true` |
+| `showAuthorPhoto` | `true` |
+| `autoOpenChatWindow` | `true` |
+| `fontScale` | 100 (50–200) |
 
-**Future Phase 2 Settings**: Font size, message density, filtering, custom colors
+**Future Phase 2 Settings**: Message density, filtering, custom colors
 
 ### 7. Error Handling and User Feedback
 

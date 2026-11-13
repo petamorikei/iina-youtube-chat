@@ -1,22 +1,42 @@
 // IINA Plugin Entry Point for YouTube Chat
 // This file runs in IINA's JavaScriptCore context
 
+import type { ChatMessage } from "../src/schemas";
 import { ArchivedChatFetcher } from "./archivedChatFetcher";
 import { LiveChatFetcher, type LiveChatMetadata } from "./liveChatFetcher";
-import type { ChatMessage } from "./schemas";
+import { buildWatchUrl, extractVideoId, isYouTubeUrl } from "./youtubeUrl";
 
 // Destructure IINA API modules
 const { event, sidebar, standaloneWindow, menu, core, console: logger, utils, preferences, http } = iina;
 
 // Initialize chat fetchers
 const liveChatFetcher = new LiveChatFetcher(utils, logger);
-const archivedChatFetcher = new ArchivedChatFetcher(utils, http, logger);
+const archivedChatFetcher = new ArchivedChatFetcher(http, logger);
+
+// Minimum interval between position updates sent to webviews
+const POSITION_UPDATE_INTERVAL_MS = 200;
+
+type SendFn = (name: string, data: unknown) => void;
 
 // Plugin state
-let currentVideoUrl: string | null = null;
+let currentVideoId: string | null = null;
 let chatData: ChatMessage[] = [];
 let isStandaloneWindowOpen = false;
 let isStandaloneWindowReady = false;
+
+// Last informational/error status, replayed to webviews that become ready later
+let lastStatus: { name: "chat-info" | "chat-error"; data: unknown } | null = null;
+
+// Warning shown alongside loaded chat (e.g. partially fetched archive), replayed to webviews that open later
+let lastWarning: { message: string; error: string } | null = null;
+
+// Incremented whenever the current chat session is invalidated (new file, retry).
+// Async work captures the value when it starts and drops its results once it no longer matches.
+let fetchGeneration = 0;
+
+// Position update throttling state
+let lastPositionSentAt = 0;
+let positionUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Live chat state
 let isLiveStream = false;
@@ -39,14 +59,14 @@ const getPreferences = () => ({
 /**
  * Send message to sidebar
  */
-const sendToSidebar = (name: string, data: unknown): void => {
+const sendToSidebar: SendFn = (name, data) => {
   sidebar.postMessage(name, data);
 };
 
 /**
  * Send message to standalone window
  */
-const sendToStandaloneWindow = (name: string, data: unknown): void => {
+const sendToStandaloneWindow: SendFn = (name, data) => {
   if (isStandaloneWindowOpen && isStandaloneWindowReady) {
     standaloneWindow.postMessage(name, data);
   }
@@ -55,37 +75,38 @@ const sendToStandaloneWindow = (name: string, data: unknown): void => {
 /**
  * Send message to all webviews (sidebar and standalone window)
  */
-const sendToAll = (name: string, data: unknown): void => {
+const sendToAll: SendFn = (name, data) => {
   sendToSidebar(name, data);
   sendToStandaloneWindow(name, data);
 };
 
 /**
- * Check if the URL is a YouTube video
+ * Send an informational message to all webviews and remember it for webviews that open later
  */
-const isYouTubeUrl = (url: string): boolean => {
-  return /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(url);
+const sendInfo = (message: string): void => {
+  const data = { message };
+  lastStatus = { name: "chat-info", data };
+  sendToAll("chat-info", data);
 };
 
 /**
- * Extract video ID from YouTube URL
+ * Send an error message to all webviews and remember it for webviews that open later
  */
-const extractVideoId = (url: string): string | null => {
-  const patterns = [/youtube\.com\/watch\?v=([^&]+)/, /youtu\.be\/([^?]+)/, /youtube\.com\/embed\/([^?]+)/];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) {
-      return match[1];
-    }
-  }
-  return null;
+const sendError = (message: string, error?: string): void => {
+  const data = error ? { message, error } : { message };
+  lastStatus = { name: "chat-error", data };
+  sendToAll("chat-error", data);
 };
+
+/**
+ * Check whether async work started in the given generation is still current
+ */
+const isCurrent = (generation: number): boolean => generation === fetchGeneration;
 
 /**
  * Send preferences to a specific webview
  */
-const sendPreferencesTo = (sendFn: (name: string, data: unknown) => void): void => {
+const sendPreferencesTo = (sendFn: SendFn): void => {
   const prefs = getPreferences();
   sendFn("preferences-update", {
     maxMessages: prefs.maxMessages,
@@ -98,9 +119,19 @@ const sendPreferencesTo = (sendFn: (name: string, data: unknown) => void): void 
 };
 
 /**
+ * Send the current playback position to a specific webview
+ */
+const sendPositionTo = (sendFn: SendFn): void => {
+  const position = core.status.position;
+  if (typeof position === "number") {
+    sendFn("position-update", { position });
+  }
+};
+
+/**
  * Send chat data to a specific webview (sidebar or standalone window)
  */
-const sendChatDataTo = (sendFn: (name: string, data: unknown) => void): void => {
+const sendChatDataTo = (sendFn: SendFn): void => {
   const CHUNK_SIZE = 100;
   const totalChunks = Math.ceil(chatData.length / CHUNK_SIZE);
 
@@ -119,6 +150,38 @@ const sendChatDataTo = (sendFn: (name: string, data: unknown) => void): void => 
   }
 
   sendFn("chat-data-complete", { totalMessages: chatData.length });
+
+  // Send the current position so the webview filters messages immediately (even while paused)
+  sendPositionTo(sendFn);
+};
+
+/**
+ * Send the current state to a webview that just became ready
+ */
+const sendCurrentStateTo = (sendFn: SendFn): void => {
+  sendPreferencesTo(sendFn);
+
+  if (!currentVideoId) {
+    if (lastStatus) {
+      sendFn(lastStatus.name, lastStatus.data);
+    } else {
+      sendFn("chat-info", { message: "Open a YouTube video to see chat" });
+    }
+    return;
+  }
+
+  if (chatData.length > 0) {
+    sendChatDataTo(sendFn);
+    sendFn("chat-loading", { loading: false });
+    if (lastWarning) {
+      sendFn("chat-warning", lastWarning);
+    }
+  } else if (lastStatus) {
+    sendFn(lastStatus.name, lastStatus.data);
+  } else {
+    // Fetch is in progress
+    sendFn("chat-loading", { loading: true });
+  }
 };
 
 // ============================================================
@@ -138,48 +201,70 @@ const stopLiveChatPolling = (): void => {
 };
 
 /**
+ * Invalidate the current chat session and clear chat state in plugin and webviews
+ * Returns the new generation number
+ */
+const resetChatState = (): number => {
+  fetchGeneration++;
+  stopLiveChatPolling();
+  chatData = [];
+  lastStatus = null;
+  lastWarning = null;
+
+  if (positionUpdateTimer) {
+    clearTimeout(positionUpdateTimer);
+    positionUpdateTimer = null;
+  }
+  lastPositionSentAt = 0;
+
+  sendToAll("chat-reset", {});
+  return fetchGeneration;
+};
+
+/**
  * Poll for live chat messages
  */
-const pollLiveChat = async (): Promise<void> => {
-  if (!liveChatMetadata || !isLiveStream) {
+const pollLiveChat = async (generation: number): Promise<void> => {
+  if (!isCurrent(generation) || !liveChatMetadata || !isLiveStream) {
     return;
   }
 
   const result = await liveChatFetcher.fetchLiveChat(liveChatMetadata);
 
+  // The video may have changed while the request was in flight
+  if (!isCurrent(generation) || !liveChatMetadata || !isLiveStream) {
+    return;
+  }
+
   if (!result.success) {
     logger.error(`[pollLiveChat] Error: ${result.error}`);
     // Continue polling even on error
-    liveChatPollingTimer = setTimeout(pollLiveChat, 5000);
+    liveChatPollingTimer = setTimeout(() => pollLiveChat(generation), 5000);
     return;
   }
 
   // Add new messages to chatData
   if (result.messages.length > 0) {
-    const isFirstBatch = chatData.length === 0;
     chatData.push(...result.messages);
 
-    // Log first batch to confirm polling works
-    if (isFirstBatch) {
-      logger.log(`[pollLiveChat] First batch received: ${result.messages.length} messages`);
+    // Live messages older than maxMessages are never displayed, so don't keep them (0 = keep all)
+    const { maxMessages } = getPreferences();
+    if (maxMessages > 0 && chatData.length > maxMessages) {
+      chatData = chatData.slice(-maxMessages);
     }
 
     // Send new messages to all webviews
     sendToAll("live-chat-messages", { messages: result.messages });
   }
 
-  // Update continuation token
+  // Schedule next poll
   if (result.continuation) {
     liveChatMetadata = {
       ...liveChatMetadata,
       continuation: result.continuation,
     };
-  }
-
-  // Schedule next poll
-  if (isLiveStream && result.continuation) {
     const pollInterval = Math.max(result.timeoutMs, 1000); // Minimum 1 second
-    liveChatPollingTimer = setTimeout(pollLiveChat, pollInterval);
+    liveChatPollingTimer = setTimeout(() => pollLiveChat(generation), pollInterval);
   } else {
     stopLiveChatPolling();
   }
@@ -188,35 +273,25 @@ const pollLiveChat = async (): Promise<void> => {
 /**
  * Start fetching live chat
  */
-const startLiveChat = async (videoId: string): Promise<boolean> => {
-  logger.log(`[startLiveChat] Starting for video: ${videoId}`);
-
-  // Reset state
+const startLiveChat = async (videoId: string, generation: number): Promise<void> => {
   liveChatFetcher.resetMessageIndex();
-  chatData = [];
 
-  // Fetch metadata
   const metadataResult = await liveChatFetcher.fetchMetadata(videoId);
+  if (!isCurrent(generation)) {
+    return;
+  }
 
   if (!metadataResult.success) {
-    if (metadataResult.isNotLive) {
-      logger.log("[startLiveChat] Not a live stream, falling back to yt-dlp");
-      return false; // Not a live stream, fall back to yt-dlp
-    }
     logger.error(`[startLiveChat] Failed to fetch metadata: ${metadataResult.error}`);
-    sendToAll("chat-error", {
-      message: "Failed to fetch live chat metadata",
-      error: metadataResult.error,
-    });
-    return true; // Tried live, but failed
+    sendError("Failed to fetch live chat metadata", metadataResult.error);
+    return;
   }
 
   // Store metadata and mark as live
   liveChatMetadata = metadataResult.metadata;
   isLiveStream = true;
 
-  logger.log("[startLiveChat] Live stream detected, starting polling");
-  sendToAll("chat-info", { message: "Live stream detected - fetching live chat..." });
+  sendInfo("Live stream detected - fetching live chat...");
 
   // Auto-open chat window if enabled
   if (getPreferences().autoOpenChatWindow) {
@@ -224,19 +299,22 @@ const startLiveChat = async (videoId: string): Promise<boolean> => {
   }
 
   // Start polling
-  pollLiveChat();
-
-  return true; // Handled as live stream
+  pollLiveChat(generation);
 };
+
+// ============================================================
+// Chat Availability (yt-dlp)
+// ============================================================
 
 /**
  * Find yt-dlp executable path
+ * Returns null if yt-dlp cannot be found
  */
-const findYtdlpPath = (): string => {
+const findYtdlpPath = (): string | null => {
   const commonPaths = [
     "/opt/homebrew/bin/yt-dlp", // macOS Apple Silicon (Homebrew)
-    "/usr/local/bin/yt-dlp", // macOS Intel (Homebrew) / Linux
-    "/usr/bin/yt-dlp", // Linux system package
+    "/usr/local/bin/yt-dlp", // macOS Intel (Homebrew)
+    "/usr/bin/yt-dlp", // System package
   ];
 
   for (const path of commonPaths) {
@@ -244,54 +322,98 @@ const findYtdlpPath = (): string => {
       return path;
     }
   }
-  return "yt-dlp"; // Fallback to PATH lookup
+
+  // Fallback to PATH lookup
+  return utils.fileInPath("yt-dlp") ? "yt-dlp" : null;
 };
+
+type ChatAvailability =
+  | { kind: "available"; isLive: boolean }
+  | { kind: "unavailable" }
+  | { kind: "error"; message: string; error: string };
 
 /**
  * Check if chat is available for a video using yt-dlp metadata
- * Returns true if chat is available, false otherwise
  */
-const checkChatAvailability = async (videoUrl: string): Promise<{ available: boolean; isLive: boolean }> => {
-  const ytdlpPath = findYtdlpPath();
-
+const checkChatAvailability = async (ytdlpPath: string, videoId: string): Promise<ChatAvailability> => {
+  let result: Awaited<ReturnType<typeof utils.exec>>;
   try {
-    const result = await utils.exec(ytdlpPath, ["--dump-json", "--no-download", videoUrl]);
-
-    if (result.status !== 0) {
-      return { available: false, isLive: false };
-    }
-
-    const metadata = JSON.parse(result.stdout);
-    const isLive = metadata.is_live === true;
-    const subtitles = metadata.subtitles || {};
-    const hasChatSubtitle = "live_chat" in subtitles;
-
-    return { available: hasChatSubtitle || isLive, isLive };
-  } catch {
-    return { available: false, isLive: false };
+    // Use the canonical watch URL so playlist parameters don't make yt-dlp dump a whole playlist
+    result = await utils.exec(ytdlpPath, ["--dump-json", "--no-download", buildWatchUrl(videoId)]);
+  } catch (error) {
+    logger.error(`[checkChatAvailability] Failed to run yt-dlp: ${error}`);
+    return { kind: "error", message: "Failed to run yt-dlp", error: String(error) };
   }
+
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    logger.error(`[checkChatAvailability] yt-dlp exited with status ${result.status}: ${stderr}`);
+    const lastLine = stderr.split("\n").pop() || `yt-dlp exited with status ${result.status}`;
+    return { kind: "error", message: "Failed to fetch video information", error: lastLine };
+  }
+
+  let metadata: { is_live?: unknown; subtitles?: Record<string, unknown> | null };
+  try {
+    metadata = JSON.parse(result.stdout);
+  } catch (error) {
+    logger.error(`[checkChatAvailability] Failed to parse yt-dlp output: ${error}`);
+    return { kind: "error", message: "Failed to parse video information", error: String(error) };
+  }
+
+  const isLive = metadata.is_live === true;
+  const hasChatSubtitle = "live_chat" in (metadata.subtitles || {});
+
+  return hasChatSubtitle || isLive ? { kind: "available", isLive } : { kind: "unavailable" };
 };
 
+// ============================================================
+// Archived Chat
+// ============================================================
+
 /**
- * Fetch archived chat data using direct YouTube API (no yt-dlp dependency)
+ * Fetch archived chat data using direct YouTube API
  * Reports progress during fetch
  */
-const fetchArchivedChatData = async (videoId: string): Promise<void> => {
-  try {
-    sendToAll("chat-loading", { loading: true });
+const fetchArchivedChatData = async (videoId: string, generation: number): Promise<void> => {
+  // Webviews that become ready during the download should show the loading state, not a stale status
+  lastStatus = null;
+  sendToAll("chat-loading", { loading: true });
 
-    const result = await archivedChatFetcher.fetchAllMessages(videoId, (progress) => {
-      // Send progress updates to webviews
-      sendToAll("chat-progress", {
-        fetchedMessages: progress.fetchedMessages,
-        currentOffsetMs: progress.currentOffsetMs,
-        status: progress.status,
-        message: progress.message,
-      });
-    });
+  try {
+    const result = await archivedChatFetcher.fetchAllMessages(
+      videoId,
+      (progress) => {
+        if (!isCurrent(generation)) {
+          return;
+        }
+        sendToAll("chat-progress", {
+          fetchedMessages: progress.fetchedMessages,
+          currentOffsetMs: progress.currentOffsetMs,
+          status: progress.status,
+          message: progress.message,
+        });
+      },
+      () => !isCurrent(generation),
+    );
+
+    if (!isCurrent(generation)) {
+      return;
+    }
 
     if (!result.success) {
-      throw new Error(result.error);
+      logger.error(`[fetchArchivedChatData] ${result.error}`);
+      sendError("Failed to fetch chat data", result.error);
+      return;
+    }
+
+    if (result.messages.length === 0) {
+      if (result.incomplete) {
+        // Nothing was fetched, but only because some segments failed: let the user retry
+        sendError("Failed to fetch chat data", result.incomplete.error);
+      } else {
+        sendInfo("No chat data available for this video");
+      }
+      return;
     }
 
     chatData = result.messages;
@@ -299,12 +421,20 @@ const fetchArchivedChatData = async (videoId: string): Promise<void> => {
     // Send chat data to all webviews
     sendChatDataTo(sendToAll);
     sendToAll("chat-loading", { loading: false });
+
+    if (result.incomplete) {
+      lastWarning = {
+        message: "Some chat messages could not be fetched",
+        error: `${result.incomplete.failedSegments} of the time segments stopped early: ${result.incomplete.error}`,
+      };
+      sendToAll("chat-warning", lastWarning);
+    }
   } catch (error) {
-    sendToAll("chat-error", {
-      message: "Failed to fetch chat data",
-      error: String(error),
-    });
-    sendToAll("chat-loading", { loading: false });
+    if (!isCurrent(generation)) {
+      return;
+    }
+    logger.error(`[fetchArchivedChatData] Unexpected error: ${error}`);
+    sendError("Unexpected error occurred", String(error));
   }
 };
 
@@ -314,140 +444,134 @@ const fetchArchivedChatData = async (videoId: string): Promise<void> => {
  * 2. If chat available, open window immediately with loading state
  * 3. Download full chat data in background
  */
-const fetchChatData = async (videoUrl: string): Promise<void> => {
-  const videoId = extractVideoId(videoUrl);
+const fetchChatData = async (videoId: string): Promise<void> => {
+  const generation = resetChatState();
 
-  if (!videoId) {
-    sendToAll("chat-error", { message: "Could not extract video ID" });
+  const ytdlpPath = findYtdlpPath();
+  if (!ytdlpPath) {
+    sendError(
+      "yt-dlp not found",
+      "yt-dlp is required to fetch YouTube chat. Install it (e.g. `brew install yt-dlp`) and click Retry.",
+    );
     return;
   }
-
-  // Stop any existing live chat polling
-  stopLiveChatPolling();
-
-  // Clear previous data and fetch fresh
-  chatData = [];
 
   // Quick metadata check
-  sendToAll("chat-info", { message: "Checking for chat data..." });
-  const { available, isLive } = await checkChatAvailability(videoUrl);
-
-  if (!available) {
-    sendToAll("chat-info", { message: "No chat data available for this video" });
+  sendInfo("Checking for chat data...");
+  const availability = await checkChatAvailability(ytdlpPath, videoId);
+  if (!isCurrent(generation)) {
     return;
   }
 
-  // Chat is available
-  if (isLive) {
-    // For live streams, always fetch fresh (need to restart polling)
-    const handled = await startLiveChat(videoId);
-    if (handled) {
-      sendToAll("chat-loading", { loading: false });
-      return;
-    }
-    // If live chat API failed, fall through to archived approach
+  if (availability.kind === "error") {
+    sendError(availability.message, availability.error);
+    return;
+  }
+
+  if (availability.kind === "unavailable") {
+    sendInfo("No chat data available for this video");
+    return;
+  }
+
+  if (availability.isLive) {
+    await startLiveChat(videoId, generation);
+    return;
   }
 
   // For archived streams: open window immediately, then download in background
-  // Auto-open chat window if enabled (before download starts)
   if (getPreferences().autoOpenChatWindow) {
     openStandaloneWindow();
   }
 
-  // Now fetch chat data in background (using videoId for direct API access)
-  await fetchArchivedChatData(videoId);
+  await fetchArchivedChatData(videoId, generation);
 };
+
+// ============================================================
+// Event Handlers
+// ============================================================
 
 /**
  * Handle file loaded event
  */
 const onFileLoaded = (): void => {
-  stopLiveChatPolling();
-
   const url = core.status.url;
+  const videoId = url ? extractVideoId(url) : null;
+
+  if (videoId) {
+    currentVideoId = videoId;
+    fetchChatData(videoId);
+    return;
+  }
+
+  // Not a YouTube video: clear chat from the previous file
+  currentVideoId = null;
+  resetChatState();
+
   if (!url) {
+    sendInfo("Open a YouTube video to see chat");
     return;
   }
 
   if (!isYouTubeUrl(url)) {
-    sendToAll("chat-info", { message: "This is not a YouTube video" });
+    sendInfo("This is not a YouTube video");
     return;
   }
 
-  const videoId = extractVideoId(url);
-  if (!videoId) {
-    sendToAll("chat-error", { message: "Could not extract YouTube video ID" });
-    return;
-  }
-
-  currentVideoUrl = url;
-  fetchChatData(url);
+  sendError("Could not extract YouTube video ID");
 };
 
 /**
- * Handle playback position changes
+ * Send the current playback position to all webviews
+ */
+const flushPositionUpdate = (): void => {
+  positionUpdateTimer = null;
+  lastPositionSentAt = Date.now();
+  sendPositionTo(sendToAll);
+};
+
+/**
+ * Handle playback position changes (throttled)
  */
 const onPositionChanged = (): void => {
-  const position = core.status.position;
-  if (!currentVideoUrl || chatData.length === 0 || position === null) {
+  if (!currentVideoId || chatData.length === 0) {
     return;
   }
 
-  // Send current position to all webviews for timestamp-based filtering
-  sendToAll("position-update", { position });
+  // A trailing update is already scheduled
+  if (positionUpdateTimer) {
+    return;
+  }
+
+  const elapsed = Date.now() - lastPositionSentAt;
+  if (elapsed >= POSITION_UPDATE_INTERVAL_MS) {
+    flushPositionUpdate();
+  } else {
+    positionUpdateTimer = setTimeout(flushPositionUpdate, POSITION_UPDATE_INTERVAL_MS - elapsed);
+  }
 };
 
 /**
- * Handle retry-fetch message from sidebar
+ * Handle retry-fetch message from webviews
  */
 const onRetryFetch = (_data: unknown): void => {
-  if (currentVideoUrl) {
-    fetchChatData(currentVideoUrl);
+  if (currentVideoId) {
+    fetchChatData(currentVideoId);
   }
 };
 
 /**
  * Handle sidebar-ready message from sidebar
- * Send current state when sidebar is ready
  */
 const onSidebarReady = (_data: unknown): void => {
-  sendPreferencesTo(sendToSidebar);
-
-  if (!currentVideoUrl) {
-    sendToSidebar("chat-info", { message: "Open a YouTube video to see chat" });
-    return;
-  }
-
-  // Send chat data if available, otherwise show loading (fetch is in progress)
-  if (chatData.length > 0) {
-    sendChatDataTo(sendToSidebar);
-    sendToSidebar("chat-loading", { loading: false });
-  } else {
-    sendToSidebar("chat-loading", { loading: true });
-  }
+  sendCurrentStateTo(sendToSidebar);
 };
 
 /**
- * Handle standalone-window-ready message from standalone window
- * Send current state when standalone window is ready
+ * Handle sidebar-ready message from standalone window
  */
 const onStandaloneWindowReady = (_data: unknown): void => {
   isStandaloneWindowReady = true;
-
-  sendPreferencesTo((name, data) => standaloneWindow.postMessage(name, data));
-
-  if (!currentVideoUrl) {
-    standaloneWindow.postMessage("chat-info", { message: "Open a YouTube video to see chat" });
-    return;
-  }
-
-  // Send chat data if available, otherwise show loading (fetch is in progress)
-  if (chatData.length > 0) {
-    sendChatDataTo((name, data) => standaloneWindow.postMessage(name, data));
-    standaloneWindow.postMessage("chat-loading", { loading: false });
-  } else {
-    standaloneWindow.postMessage("chat-loading", { loading: true });
-  }
+  sendCurrentStateTo((name, data) => standaloneWindow.postMessage(name, data));
 };
 
 /**
@@ -508,7 +632,8 @@ event.on("iina.window-will-close", () => {
     isStandaloneWindowOpen = false;
     isStandaloneWindowReady = false;
   }
-  // Stop live chat polling
+  // Stop live chat polling and drop in-flight results
+  fetchGeneration++;
   stopLiveChatPolling();
 });
 

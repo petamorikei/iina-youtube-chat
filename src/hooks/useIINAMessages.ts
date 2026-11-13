@@ -5,6 +5,8 @@ import {
   ChatErrorMessageSchema,
   ChatInfoMessageSchema,
   ChatLoadingMessageSchema,
+  ChatProgressMessageSchema,
+  ChatWarningMessageSchema,
   LiveChatMessagesSchema,
   PositionUpdateMessageSchema,
   PreferencesUpdateMessageSchema,
@@ -24,7 +26,10 @@ export const useIINAMessages = () => {
   const [state, setState] = useState<AppState>({
     loading: true, // Start with loading state until plugin sends actual status
     error: null,
+    errorDetail: null,
     info: null,
+    warning: null,
+    warningDetail: null,
     progress: null,
     messages: [],
     currentPosition: null,
@@ -36,10 +41,26 @@ export const useIINAMessages = () => {
   const expectedChunksRef = useRef<number>(0);
 
   useEffect(() => {
-    console.log("[useIINAMessages] useEffect called, registering message handlers");
-    console.log("[useIINAMessages] iina object:", typeof iina, iina);
-
     // Register separate message handlers for each message type
+
+    // Clear all chat state (sent by the plugin when the video changes or a fetch restarts)
+    iina.onMessage("chat-reset", () => {
+      chunksRef.current.clear();
+      expectedChunksRef.current = 0;
+      setState((prev) => ({
+        ...prev,
+        loading: true,
+        error: null,
+        errorDetail: null,
+        info: null,
+        warning: null,
+        warningDetail: null,
+        progress: null,
+        messages: [],
+        currentPosition: null,
+      }));
+    });
+
     iina.onMessage("chat-loading", (data: unknown) => {
       const parseResult = ChatLoadingMessageSchema.safeParse(data);
       if (!parseResult.success) {
@@ -47,23 +68,22 @@ export const useIINAMessages = () => {
         return;
       }
       const { loading } = parseResult.data;
-      setState((prev) => ({
-        ...prev,
-        loading,
-        error: null,
-        info: null,
-        progress: loading ? prev.progress : null, // Clear progress when loading ends
-      }));
+      setState((prev) =>
+        loading
+          ? // Starting to load: clear previous status
+            { ...prev, loading, error: null, errorDetail: null, info: null, warning: null, warningDetail: null }
+          : // Finished loading: keep any error/info that was reported
+            { ...prev, loading, progress: null },
+      );
     });
 
     iina.onMessage("chat-progress", (data: unknown) => {
-      // Handle progress updates during chat fetching
-      const progress = data as {
-        fetchedMessages: number;
-        currentOffsetMs: number;
-        status: "fetching" | "complete" | "error";
-        message?: string;
-      };
+      const parseResult = ChatProgressMessageSchema.safeParse(data);
+      if (!parseResult.success) {
+        console.error("[useIINAMessages] Invalid chat-progress message:", parseResult.error);
+        return;
+      }
+      const progress = parseResult.data;
       setState((prev) => ({
         ...prev,
         progress: progress.status === "complete" ? null : progress,
@@ -93,17 +113,6 @@ export const useIINAMessages = () => {
 
       const { totalMessages } = parseResult.data;
 
-      // Check for missing chunks
-      const missingChunks: number[] = [];
-      for (let i = 0; i < expectedChunksRef.current; i++) {
-        if (!chunksRef.current.has(i)) {
-          missingChunks.push(i);
-        }
-      }
-      if (missingChunks.length > 0) {
-        console.error(`[useIINAMessages] Missing chunks: ${missingChunks.join(", ")}`);
-      }
-
       // Assemble all chunks in order
       const allMessages: ChatMessage[] = [];
       for (let i = 0; i < expectedChunksRef.current; i++) {
@@ -119,7 +128,7 @@ export const useIINAMessages = () => {
         console.error(`[useIINAMessages] Message count mismatch: expected ${totalMessages}, got ${allMessages.length}`);
       }
 
-      setState((prev) => ({ ...prev, messages: allMessages, error: null, info: null }));
+      setState((prev) => ({ ...prev, messages: allMessages, error: null, errorDetail: null, info: null }));
 
       // Clear chunks
       chunksRef.current.clear();
@@ -132,9 +141,26 @@ export const useIINAMessages = () => {
         console.error("[useIINAMessages] Invalid chat-error message:", parseResult.error);
         return;
       }
-      const { message } = parseResult.data;
-      console.error("[useIINAMessages] Chat error:", message);
-      setState((prev) => ({ ...prev, error: message, loading: false }));
+      const { message, error } = parseResult.data;
+      console.error("[useIINAMessages] Chat error:", message, error ?? "");
+      setState((prev) => ({
+        ...prev,
+        error: message,
+        errorDetail: error ?? null,
+        info: null,
+        loading: false,
+        progress: null,
+      }));
+    });
+
+    iina.onMessage("chat-warning", (data: unknown) => {
+      const parseResult = ChatWarningMessageSchema.safeParse(data);
+      if (!parseResult.success) {
+        console.error("[useIINAMessages] Invalid chat-warning message:", parseResult.error);
+        return;
+      }
+      const { message, error } = parseResult.data;
+      setState((prev) => ({ ...prev, warning: message, warningDetail: error ?? null }));
     });
 
     iina.onMessage("chat-info", (data: unknown) => {
@@ -144,7 +170,7 @@ export const useIINAMessages = () => {
         return;
       }
       const { message } = parseResult.data;
-      setState((prev) => ({ ...prev, info: message, loading: false }));
+      setState((prev) => ({ ...prev, info: message, error: null, errorDetail: null, loading: false }));
     });
 
     iina.onMessage("live-chat-messages", (data: unknown) => {
@@ -154,14 +180,19 @@ export const useIINAMessages = () => {
         return;
       }
       const { messages: newMessages } = parseResult.data;
-      console.log(`[useIINAMessages] Received ${newMessages.length} live chat messages`);
-      // Append new messages to existing ones
-      setState((prev) => ({
-        ...prev,
-        messages: [...prev.messages, ...newMessages],
-        loading: false, // Clear loading state when receiving chat
-        info: null, // Clear info message when receiving chat
-      }));
+      setState((prev) => {
+        // Append new messages, keeping only the latest maxMessages (0 = keep all).
+        // Older live messages are never displayed, so holding them would only use memory.
+        const { maxMessages } = prev.preferences;
+        const merged = [...prev.messages, ...newMessages];
+        const messages = maxMessages > 0 && merged.length > maxMessages ? merged.slice(-maxMessages) : merged;
+        return {
+          ...prev,
+          messages,
+          loading: false, // Clear loading state when receiving chat
+          info: null, // Clear info message when receiving chat
+        };
+      });
     });
 
     iina.onMessage("position-update", (data: unknown) => {
@@ -189,9 +220,7 @@ export const useIINAMessages = () => {
     });
 
     // Send ready signal to plugin to request current data
-    console.log("[useIINAMessages] About to send sidebar-ready message");
     iina.postMessage("sidebar-ready", {});
-    console.log("[useIINAMessages] sidebar-ready message sent");
   }, []);
 
   const handleRetry = () => {

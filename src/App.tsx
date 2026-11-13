@@ -8,10 +8,12 @@ const App = () => {
 
   return (
     <Flex direction="column" height="100vh" backgroundColor="background" color="white">
-      <Box flex="1" overflow="hidden" padding="1rem">
+      <Flex direction="column" gap="0.5rem" flex="1" minHeight="0" overflow="hidden" padding="1rem">
         {state.loading && <StatusMessage type="loading" message={state.progress?.message || "Loading chat data..."} />}
 
-        {state.error && <StatusMessage type="error" message={state.error} onRetry={handleRetry} />}
+        {state.error && (
+          <StatusMessage type="error" message={state.error} detail={state.errorDetail} onRetry={handleRetry} />
+        )}
 
         {state.info && <StatusMessage type="info" message={state.info} />}
 
@@ -19,14 +21,26 @@ const App = () => {
           <StatusMessage type="info" message="No chat messages available" />
         )}
 
-        {state.messages.length > 0 && (
-          <MessageList
-            messages={state.messages}
-            currentPosition={state.currentPosition}
-            preferences={state.preferences}
+        {state.warning && (
+          <StatusMessage
+            type="warning"
+            compact
+            message={state.warning}
+            detail={state.warningDetail}
+            onRetry={handleRetry}
           />
         )}
-      </Box>
+
+        {state.messages.length > 0 && (
+          <Box flex="1" minHeight="0">
+            <MessageList
+              messages={state.messages}
+              currentPosition={state.currentPosition}
+              preferences={state.preferences}
+            />
+          </Box>
+        )}
+      </Flex>
     </Flex>
   );
 };

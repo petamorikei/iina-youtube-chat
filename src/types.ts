@@ -32,11 +32,14 @@ export interface ChatProgress {
 export interface AppState {
   loading: boolean;
   error: string | null;
+  errorDetail: string | null;
   info: string | null;
+  warning: string | null;
+  warningDetail: string | null;
   progress: ChatProgress | null;
   messages: ChatMessage[];
   currentPosition: number | null;
   preferences: UserPreferences;
 }
 
-export type StatusMessageType = "loading" | "error" | "info";
+export type StatusMessageType = "loading" | "error" | "info" | "warning";

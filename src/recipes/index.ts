@@ -27,4 +27,4 @@ export {
   virtualItem,
   virtualListContainer,
 } from "./messageList.recipe";
-export { retryButton, spinner, statusMessage, statusText } from "./statusMessage.recipe";
+export { retryButton, spinner, statusDetail, statusMessage, statusText } from "./statusMessage.recipe";

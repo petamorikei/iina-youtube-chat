@@ -128,6 +128,16 @@ export const ChatDataChunkMessageSchema = z.object({
 });
 
 /**
+ * Schema for chat-progress message from plugin
+ */
+export const ChatProgressMessageSchema = z.object({
+  fetchedMessages: z.number(),
+  currentOffsetMs: z.number(),
+  status: z.enum(["fetching", "complete", "error"]),
+  message: z.string().optional(),
+});
+
+/**
  * Schema for chat-data-complete message from plugin
  */
 export const ChatDataCompleteMessageSchema = z.object({
@@ -138,6 +148,14 @@ export const ChatDataCompleteMessageSchema = z.object({
  * Schema for chat-error message from plugin
  */
 export const ChatErrorMessageSchema = z.object({
+  message: z.string(),
+  error: z.string().optional(),
+});
+
+/**
+ * Schema for chat-warning message from plugin (chat is shown, but something went partially wrong)
+ */
+export const ChatWarningMessageSchema = z.object({
   message: z.string(),
   error: z.string().optional(),
 });

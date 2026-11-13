@@ -23,6 +23,18 @@ export const statusMessage = cva({
         backgroundColor: "status.infoBg",
         color: "status.info",
       },
+      warning: {
+        backgroundColor: "status.warningBg",
+        color: "status.warning",
+      },
+    },
+    // Compact banner shown above the message list
+    compact: {
+      true: {
+        padding: "0.5rem 0.75rem",
+        fontSize: "0.75rem",
+        flexShrink: 0,
+      },
     },
   },
   defaultVariants: {
@@ -63,6 +75,19 @@ export const spinner = cva({
     borderRadius: "50%",
     animation: "spin 1s linear infinite",
     margin: "0 auto 1rem",
+  },
+});
+
+/**
+ * Technical detail text shown below an error message
+ */
+export const statusDetail = cva({
+  base: {
+    marginTop: "0.5rem",
+    fontSize: "0.75rem",
+    opacity: 0.8,
+    wordBreak: "break-word",
+    userSelect: "text",
   },
 });
 

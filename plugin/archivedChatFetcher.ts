@@ -10,7 +10,8 @@
  * 4. Loop: POST to get_live_chat_replay API endpoint until no more continuations
  */
 
-import type { AuthorBadge, BadgeType, ChatMessage, MessageRun, MessageType, SuperChatColors } from "./schemas";
+import type { ChatMessage } from "../src/schemas";
+import { type ChatItem, ChatItemParser } from "./chatItemParser";
 
 // Types for IINA API
 interface IINAConsole {
@@ -37,18 +38,17 @@ interface IINAHTTP {
   post(url: string, options: HTTPRequestOption): Promise<HTTPResponse>;
 }
 
-interface ExecResult {
-  status: number;
-  stdout: string;
-  stderr: string;
-}
-
-interface IINAUtils {
-  exec(path: string, args: string[], cwd?: string): Promise<ExecResult>;
-}
-
 // Parallel fetch configuration
 const PARALLEL_WORKERS = 10;
+
+// Retry configuration for API fragment requests
+const MAX_FRAGMENT_ATTEMPTS = 3;
+const FRAGMENT_RETRY_DELAY_MS = 1000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Returns true when the caller no longer needs the result (e.g. the video changed)
+export type CancelCheck = () => boolean;
 
 // Progress callback type
 export type ProgressCallback = (progress: {
@@ -79,105 +79,6 @@ interface YtCfg {
   INNERTUBE_CONTEXT_CLIENT_NAME?: number;
 }
 
-// Chat message types from YouTube
-interface Thumbnail {
-  url: string;
-  width?: number;
-  height?: number;
-}
-
-interface MessageRunYT {
-  text?: string;
-  emoji?: {
-    emojiId?: string;
-    shortcuts?: string[];
-    image?: { thumbnails?: Thumbnail[] };
-    isCustomEmoji?: boolean;
-  };
-}
-
-interface AuthorBadgeYT {
-  liveChatAuthorBadgeRenderer: {
-    icon?: { iconType?: string };
-    tooltip?: string;
-    customThumbnail?: { thumbnails?: Thumbnail[] };
-  };
-}
-
-interface LiveChatRenderer {
-  id: string;
-  message?: { runs?: MessageRunYT[] };
-  authorName?: { simpleText?: string };
-  authorPhoto?: { thumbnails?: Thumbnail[] };
-  authorExternalChannelId?: string;
-  authorBadges?: AuthorBadgeYT[];
-  timestampUsec?: string;
-  timestampText?: { simpleText?: string };
-}
-
-interface LiveChatPaidRenderer extends LiveChatRenderer {
-  purchaseAmountText?: { simpleText?: string };
-  headerBackgroundColor?: number;
-  headerTextColor?: number;
-  bodyBackgroundColor?: number;
-  bodyTextColor?: number;
-  authorNameTextColor?: number;
-}
-
-interface LiveChatStickerRenderer {
-  id: string;
-  authorName?: { simpleText?: string };
-  authorPhoto?: { thumbnails?: Thumbnail[] };
-  authorExternalChannelId?: string;
-  authorBadges?: AuthorBadgeYT[];
-  timestampUsec?: string;
-  timestampText?: { simpleText?: string };
-  purchaseAmountText?: { simpleText?: string };
-  sticker?: { thumbnails?: Thumbnail[] };
-  backgroundColor?: number;
-  authorNameTextColor?: number;
-}
-
-interface LiveChatMembershipRenderer {
-  id: string;
-  authorName?: { simpleText?: string };
-  authorPhoto?: { thumbnails?: Thumbnail[] };
-  authorExternalChannelId?: string;
-  authorBadges?: AuthorBadgeYT[];
-  timestampUsec?: string;
-  timestampText?: { simpleText?: string };
-  headerSubtext?: { runs?: MessageRunYT[] };
-  message?: { runs?: MessageRunYT[] };
-}
-
-interface LiveChatGiftRenderer {
-  id: string;
-  authorName?: { simpleText?: string };
-  authorPhoto?: { thumbnails?: Thumbnail[] };
-  authorExternalChannelId?: string;
-  timestampUsec?: string;
-  timestampText?: { simpleText?: string };
-  header?: {
-    liveChatSponsorshipsHeaderRenderer?: {
-      primaryText?: { runs?: MessageRunYT[] };
-    };
-  };
-}
-
-interface LiveChatEngagementRenderer {
-  id: string;
-  message?: { runs?: MessageRunYT[] };
-}
-
-interface ChatItem {
-  liveChatTextMessageRenderer?: LiveChatRenderer;
-  liveChatPaidMessageRenderer?: LiveChatPaidRenderer;
-  liveChatPaidStickerRenderer?: LiveChatStickerRenderer;
-  liveChatMembershipItemRenderer?: LiveChatMembershipRenderer;
-  liveChatSponsorshipsGiftPurchaseAnnouncementRenderer?: LiveChatGiftRenderer;
-  liveChatViewerEngagementMessageRenderer?: LiveChatEngagementRenderer;
-}
-
 interface ReplayChatItemAction {
   actions?: Array<{ addChatItemAction?: { item: ChatItem } }>;
   videoOffsetTimeMsec?: string;
@@ -189,7 +90,10 @@ interface ChatAction {
 }
 
 // Result type
-export type ArchivedChatResult = { success: true; messages: ChatMessage[] } | { success: false; error: string };
+// `incomplete` is set when some segments could not be fetched completely
+export type ArchivedChatResult =
+  | { success: true; messages: ChatMessage[]; incomplete: { failedSegments: number; error: string } | null }
+  | { success: false; error: string };
 
 // Segment worker result for parallel fetching
 interface SegmentWorkerResult {
@@ -198,6 +102,8 @@ interface SegmentWorkerResult {
   fragments: number;
   startOffsetMs: number;
   endOffsetMs: number;
+  // Error that stopped this worker before reaching the end of its segment
+  error?: string;
 }
 
 /**
@@ -206,10 +112,13 @@ interface SegmentWorkerResult {
  */
 export class ArchivedChatFetcher {
   private http: IINAHTTP;
-  private messageIndex = 0;
+  private logger: IINAConsole;
+  // Archived renderers carry a display timestamp text (e.g. "1:23:45")
+  private parser = new ChatItemParser("archived", (renderer) => renderer.timestampText?.simpleText);
 
-  constructor(_utils: IINAUtils, http: IINAHTTP, _logger: IINAConsole) {
+  constructor(http: IINAHTTP, logger: IINAConsole) {
     this.http = http;
+    this.logger = logger;
   }
 
   // ============================================================
@@ -545,6 +454,40 @@ export class ArchivedChatFetcher {
   // ============================================================
 
   /**
+   * Fetch a single API fragment, retrying on failure
+   */
+  private async fetchFragmentWithRetry(
+    apiUrl: string,
+    context: InnertubeContext,
+    continuation: string,
+    headers: Record<string, string>,
+    isCancelled: CancelCheck,
+    seekOffsetMs?: number,
+  ): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
+    let result: { success: boolean; data?: Record<string, unknown>; error?: string } = {
+      success: false,
+      error: "Not attempted",
+    };
+
+    for (let attempt = 1; attempt <= MAX_FRAGMENT_ATTEMPTS; attempt++) {
+      if (isCancelled()) {
+        return { success: false, error: "Cancelled" };
+      }
+
+      result = await this.fetchFragment(apiUrl, context, continuation, headers, seekOffsetMs);
+      if (result.success) {
+        return result;
+      }
+
+      if (attempt < MAX_FRAGMENT_ATTEMPTS) {
+        await sleep(FRAGMENT_RETRY_DELAY_MS * attempt);
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Fetch a single API fragment with optional seek offset
    */
   private async fetchFragment(
@@ -637,22 +580,42 @@ export class ArchivedChatFetcher {
     headers: Record<string, string>,
     startOffsetMs: number,
     endOffsetMs: number,
+    isCancelled: CancelCheck,
     onProgress?: (workerId: number, messageCount: number) => void,
   ): Promise<SegmentWorkerResult> {
     const messages: ChatMessage[] = [];
     let fragments = 0;
     let actualStartOffsetMs = startOffsetMs;
     let actualEndOffsetMs = startOffsetMs;
+    const buildResult = (error?: string): SegmentWorkerResult => ({
+      workerId,
+      messages,
+      fragments,
+      startOffsetMs: actualStartOffsetMs,
+      endOffsetMs: actualEndOffsetMs,
+      error,
+    });
 
     // First request with seek
-    let result = await this.fetchFragment(apiUrl, context, initialContinuation, headers, startOffsetMs);
+    let result = await this.fetchFragmentWithRetry(
+      apiUrl,
+      context,
+      initialContinuation,
+      headers,
+      isCancelled,
+      startOffsetMs,
+    );
     if (!result.success || !result.data) {
-      return { workerId, messages, fragments, startOffsetMs: actualStartOffsetMs, endOffsetMs: actualEndOffsetMs };
+      return buildResult(result.error || "Failed to fetch first fragment");
     }
 
     let lcc = this.getLiveChatContinuation(result.data);
 
     while (lcc) {
+      if (isCancelled()) {
+        return buildResult("Cancelled");
+      }
+
       fragments++;
       const parsed = this.parseReplayResponse(lcc);
       const segmentMessages = this.parseActions(parsed.actions);
@@ -677,13 +640,15 @@ export class ArchivedChatFetcher {
       // Get next continuation
       if (!parsed.continuation) break;
 
-      result = await this.fetchFragment(apiUrl, context, parsed.continuation, headers);
-      if (!result.success || !result.data) break;
+      result = await this.fetchFragmentWithRetry(apiUrl, context, parsed.continuation, headers, isCancelled);
+      if (!result.success || !result.data) {
+        return buildResult(result.error || "Failed to fetch fragment");
+      }
 
       lcc = this.getLiveChatContinuation(result.data);
     }
 
-    return { workerId, messages, fragments, startOffsetMs: actualStartOffsetMs, endOffsetMs: actualEndOffsetMs };
+    return buildResult();
   }
 
   // ============================================================
@@ -694,8 +659,12 @@ export class ArchivedChatFetcher {
    * Fetch all archived chat messages
    * Main entry point - follows yt-dlp's real_download flow (youtube_live_chat.py:19-192)
    */
-  async fetchAllMessages(videoId: string, onProgress?: ProgressCallback): Promise<ArchivedChatResult> {
-    this.messageIndex = 0;
+  async fetchAllMessages(
+    videoId: string,
+    onProgress?: ProgressCallback,
+    isCancelled: CancelCheck = () => false,
+  ): Promise<ArchivedChatResult> {
+    this.parser.reset();
     const allMessages: ChatMessage[] = [];
 
     onProgress?.({ fetchedMessages: 0, currentOffsetMs: 0, status: "fetching", message: "Fetching video page..." });
@@ -785,7 +754,8 @@ export class ArchivedChatFetcher {
           status: "complete",
           message: `Fetched ${allMessages.length} messages`,
         });
-        return { success: true, messages: allMessages };
+        allMessages.sort((a, b) => a.timestamp - b.timestamp);
+        return { success: true, messages: allMessages, incomplete: null };
       }
 
       continuationId = firstParsed.continuation;
@@ -823,11 +793,8 @@ export class ArchivedChatFetcher {
     }
 
     // Get video duration from video page HTML (no additional HTTP requests needed)
-    let videoDurationMs = this.extractVideoDurationFromHtml(videoHtml);
-    if (!videoDurationMs) {
-      // Fallback: use a default duration (2 hours)
-      videoDurationMs = 2 * 60 * 60 * 1000;
-    }
+    // If unknown, assume 2 hours for segmenting; the last worker runs until the chat ends anyway
+    const videoDurationMs = this.extractVideoDurationFromHtml(videoHtml) ?? 2 * 60 * 60 * 1000;
 
     // Divide into segments
     const segmentDuration = videoDurationMs / PARALLEL_WORKERS;
@@ -839,8 +806,8 @@ export class ArchivedChatFetcher {
         end: Math.floor((i + 1) * segmentDuration),
       });
     }
-    // Ensure last segment goes past the end
-    segments[PARALLEL_WORKERS - 1].end = videoDurationMs + 60000;
+    // The last segment has no upper bound so it continues until there are no more continuations
+    segments[PARALLEL_WORKERS - 1].end = Number.POSITIVE_INFINITY;
 
     // Track progress per worker
     const workerProgress = new Array(PARALLEL_WORKERS).fill(0);
@@ -864,10 +831,36 @@ export class ArchivedChatFetcher {
     });
 
     const workerPromises = segments.map((seg, i) =>
-      this.fetchSegment(i, apiUrl, innertubeContext, continuationId, headers, seg.start, seg.end, updateProgress),
+      this.fetchSegment(
+        i,
+        apiUrl,
+        innertubeContext,
+        continuationId,
+        headers,
+        seg.start,
+        seg.end,
+        isCancelled,
+        updateProgress,
+      ),
     );
 
     const workerResults = await Promise.all(workerPromises);
+
+    if (isCancelled()) {
+      return { success: false, error: "Cancelled" };
+    }
+
+    const failedWorkers = workerResults.filter((result) => result.error !== undefined);
+    for (const failed of failedWorkers) {
+      this.logger.error(
+        `[ArchivedChatFetcher] Segment ${failed.workerId} stopped early after ${failed.fragments} fragments: ${failed.error}`,
+      );
+    }
+
+    const fetchedCount = workerResults.reduce((count, result) => count + result.messages.length, allMessages.length);
+    if (failedWorkers.length === workerResults.length && fetchedCount === 0) {
+      return { success: false, error: failedWorkers[0]?.error || "Failed to fetch chat messages" };
+    }
 
     // Merge and deduplicate
     const seenIds = new Set<string>();
@@ -899,7 +892,12 @@ export class ArchivedChatFetcher {
       message: `Fetched ${allMessages.length} messages`,
     });
 
-    return { success: true, messages: allMessages };
+    const incomplete =
+      failedWorkers.length > 0
+        ? { failedSegments: failedWorkers.length, error: failedWorkers[0]?.error || "Unknown error" }
+        : null;
+
+    return { success: true, messages: allMessages, incomplete };
   }
 
   // ============================================================
@@ -918,7 +916,7 @@ export class ArchivedChatFetcher {
         for (const innerAction of action.replayChatItemAction.actions || []) {
           const item = innerAction.addChatItemAction?.item;
           if (item) {
-            const msg = this.parseItem(item, timestamp);
+            const msg = this.parser.parseItem(item, timestamp);
             if (msg) {
               messages.push(msg);
             }
@@ -927,7 +925,7 @@ export class ArchivedChatFetcher {
       }
       // Handle direct addChatItemAction (for some edge cases)
       else if (action.addChatItemAction?.item) {
-        const msg = this.parseItem(action.addChatItemAction.item, 0);
+        const msg = this.parser.parseItem(action.addChatItemAction.item, 0);
         if (msg) {
           messages.push(msg);
         }
@@ -935,232 +933,5 @@ export class ArchivedChatFetcher {
     }
 
     return messages;
-  }
-
-  private parseItem(item: ChatItem, timestamp: number): ChatMessage | null {
-    const index = this.messageIndex++;
-
-    // Regular text message
-    if (item.liveChatTextMessageRenderer) {
-      const r = item.liveChatTextMessageRenderer;
-      const { text, messageRuns } = this.parseMessageRuns(r.message?.runs);
-
-      if (!text && messageRuns.length === 0) return null;
-
-      return {
-        id: r.id || `archived-${index}`,
-        type: "text" as MessageType,
-        timestamp,
-        author: r.authorName?.simpleText || "Unknown",
-        authorPhoto: this.getBestThumbnail(r.authorPhoto?.thumbnails),
-        authorChannelId: r.authorExternalChannelId,
-        authorBadges: this.parseAuthorBadges(r.authorBadges),
-        message: text,
-        messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-        timestampText: r.timestampText?.simpleText,
-      };
-    }
-
-    // Super Chat
-    if (item.liveChatPaidMessageRenderer) {
-      const r = item.liveChatPaidMessageRenderer;
-      const { text, messageRuns } = this.parseMessageRuns(r.message?.runs);
-
-      return {
-        id: r.id || `archived-${index}`,
-        type: "superchat" as MessageType,
-        timestamp,
-        author: r.authorName?.simpleText || "Unknown",
-        authorPhoto: this.getBestThumbnail(r.authorPhoto?.thumbnails),
-        authorChannelId: r.authorExternalChannelId,
-        authorBadges: this.parseAuthorBadges(r.authorBadges),
-        message: text || "(Super Chat)",
-        messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-        timestampText: r.timestampText?.simpleText,
-        amount: r.purchaseAmountText?.simpleText,
-        colors: this.parseSuperChatColors(r),
-      };
-    }
-
-    // Super Sticker
-    if (item.liveChatPaidStickerRenderer) {
-      const r = item.liveChatPaidStickerRenderer;
-
-      return {
-        id: r.id || `archived-${index}`,
-        type: "supersticker" as MessageType,
-        timestamp,
-        author: r.authorName?.simpleText || "Unknown",
-        authorPhoto: this.getBestThumbnail(r.authorPhoto?.thumbnails),
-        authorChannelId: r.authorExternalChannelId,
-        authorBadges: this.parseAuthorBadges(r.authorBadges),
-        message: "(Super Sticker)",
-        timestampText: r.timestampText?.simpleText,
-        amount: r.purchaseAmountText?.simpleText,
-        stickerUrl: this.getBestThumbnail(r.sticker?.thumbnails),
-        colors: {
-          bodyBackgroundColor: this.colorToHex(r.backgroundColor),
-          authorNameTextColor: this.colorToHex(r.authorNameTextColor),
-        },
-      };
-    }
-
-    // Membership
-    if (item.liveChatMembershipItemRenderer) {
-      const r = item.liveChatMembershipItemRenderer;
-      const { text: headerText } = this.parseMessageRuns(r.headerSubtext?.runs);
-      const { text, messageRuns } = this.parseMessageRuns(r.message?.runs);
-
-      return {
-        id: r.id || `archived-${index}`,
-        type: "membership" as MessageType,
-        timestamp,
-        author: r.authorName?.simpleText || "Unknown",
-        authorPhoto: this.getBestThumbnail(r.authorPhoto?.thumbnails),
-        authorChannelId: r.authorExternalChannelId,
-        authorBadges: this.parseAuthorBadges(r.authorBadges),
-        message: text || headerText || "(New Member)",
-        messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-        timestampText: r.timestampText?.simpleText,
-        membershipLevel: headerText || undefined,
-      };
-    }
-
-    // Gift Membership
-    if (item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer) {
-      const r = item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer;
-      const { text: giftText } = this.parseMessageRuns(r.header?.liveChatSponsorshipsHeaderRenderer?.primaryText?.runs);
-
-      return {
-        id: r.id || `archived-${index}`,
-        type: "gift" as MessageType,
-        timestamp,
-        author: r.authorName?.simpleText || "Unknown",
-        authorPhoto: this.getBestThumbnail(r.authorPhoto?.thumbnails),
-        authorChannelId: r.authorExternalChannelId,
-        message: giftText || "(Gift Membership)",
-        timestampText: r.timestampText?.simpleText,
-      };
-    }
-
-    // System/Engagement message
-    if (item.liveChatViewerEngagementMessageRenderer) {
-      const r = item.liveChatViewerEngagementMessageRenderer;
-      const { text, messageRuns } = this.parseMessageRuns(r.message?.runs);
-
-      if (!text) return null;
-
-      return {
-        id: r.id || `archived-${index}`,
-        type: "system" as MessageType,
-        timestamp,
-        author: "YouTube",
-        message: text,
-        messageRuns: messageRuns.length > 0 ? messageRuns : undefined,
-      };
-    }
-
-    return null;
-  }
-
-  // ============================================================
-  // Helper Methods
-  // ============================================================
-
-  private parseMessageRuns(runs: MessageRunYT[] | undefined): { text: string; messageRuns: MessageRun[] } {
-    if (!runs?.length) {
-      return { text: "", messageRuns: [] };
-    }
-
-    const messageRuns: MessageRun[] = [];
-    let plainText = "";
-
-    for (const run of runs) {
-      if (run.text) {
-        plainText += run.text;
-        messageRuns.push({ type: "text", text: run.text });
-      } else if (run.emoji) {
-        const emojiId = run.emoji.emojiId || "";
-        const shortcut = run.emoji.shortcuts?.[0];
-        const imageUrl = run.emoji.image?.thumbnails?.[0]?.url;
-        const isCustom = run.emoji.isCustomEmoji;
-
-        plainText += shortcut || emojiId;
-        messageRuns.push({
-          type: "emoji",
-          emoji: { emojiId, shortcut, imageUrl, isCustom },
-        });
-      }
-    }
-
-    return { text: plainText, messageRuns };
-  }
-
-  private parseAuthorBadges(badges: AuthorBadgeYT[] | undefined): AuthorBadge[] | undefined {
-    if (!badges?.length) return undefined;
-
-    const result: AuthorBadge[] = [];
-
-    for (const badge of badges) {
-      const renderer = badge.liveChatAuthorBadgeRenderer;
-      const iconType = renderer.icon?.iconType?.toLowerCase();
-      const tooltip = renderer.tooltip || "";
-
-      let badgeType: BadgeType | undefined;
-
-      if (iconType === "verified") {
-        badgeType = "verified";
-      } else if (iconType === "owner") {
-        badgeType = "owner";
-      } else if (iconType === "moderator") {
-        badgeType = "moderator";
-      } else if (iconType === "member" || renderer.customThumbnail) {
-        badgeType = "member";
-      }
-
-      if (badgeType) {
-        result.push({
-          type: badgeType,
-          label: tooltip,
-          customIcon: this.getBestThumbnail(renderer.customThumbnail?.thumbnails),
-        });
-      }
-    }
-
-    return result.length > 0 ? result : undefined;
-  }
-
-  private getBestThumbnail(thumbnails: Thumbnail[] | undefined): string | undefined {
-    if (!thumbnails?.length) return undefined;
-    const sorted = [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-    return sorted[0]?.url;
-  }
-
-  private colorToHex(colorNum: number | undefined): string | undefined {
-    if (colorNum === undefined) return undefined;
-    const unsigned = colorNum >>> 0;
-    const hex = unsigned.toString(16).padStart(8, "0");
-    const a = hex.slice(0, 2);
-    const rgb = hex.slice(2);
-    return `#${rgb}${a}`;
-  }
-
-  private parseSuperChatColors(renderer: {
-    headerBackgroundColor?: number;
-    headerTextColor?: number;
-    bodyBackgroundColor?: number;
-    bodyTextColor?: number;
-    authorNameTextColor?: number;
-  }): SuperChatColors | undefined {
-    const colors: SuperChatColors = {
-      headerBackgroundColor: this.colorToHex(renderer.headerBackgroundColor),
-      headerTextColor: this.colorToHex(renderer.headerTextColor),
-      bodyBackgroundColor: this.colorToHex(renderer.bodyBackgroundColor),
-      bodyTextColor: this.colorToHex(renderer.bodyTextColor),
-      authorNameTextColor: this.colorToHex(renderer.authorNameTextColor),
-    };
-
-    const hasColors = Object.values(colors).some((c) => c !== undefined);
-    return hasColors ? colors : undefined;
   }
 }

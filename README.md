@@ -19,7 +19,7 @@ Display YouTube live chat and archived stream chat synchronized with video playb
 ### Requirements
 
 - [IINA](https://iina.io/) 1.4.0 or later
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (required for archived stream chat)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (required for both live and archived stream chat)
 
 ### Installing yt-dlp
 
@@ -68,7 +68,7 @@ Configure via IINA Settings → Plugins → iina-youtube-chat
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Maximum messages | Max number of messages to display (0 = unlimited) | 200 |
+| Maximum messages | Max number of messages to display (0 = unlimited; live streams then keep every message in memory) | 200 |
 | Scroll direction | Chat scroll direction | Bottom to top |
 | Show timestamp | Display message timestamps | ON |
 | Show author name | Display author names | ON |
@@ -88,7 +88,7 @@ Configure via IINA Settings → Plugins → iina-youtube-chat
 
 ### Chat not displaying
 
-- **For archived streams**: Make sure yt-dlp is installed
+- Make sure yt-dlp is installed (required for both live and archived streams)
 - **For live streams**: Verify that chat is enabled for the stream
 - Regular videos (non-livestreams) do not have chat
 
@@ -107,7 +107,7 @@ brew install yt-dlp
 ### Tech Stack
 
 - **React 19** + **TypeScript 5.9**
-- **Vite** (rolldown-vite) - Build tool
+- **Vite 8** - Build tool
 - **Panda CSS** - Styling
 - **TanStack Virtual** - Virtual scrolling
 - **Zod** - Schema validation
@@ -140,12 +140,15 @@ pnpm check
 ├── Info.json         # Plugin metadata (at root for GitHub distribution)
 ├── plugin/           # IINA plugin source code
 │   ├── entry.ts      # Main entry
+│   ├── archivedChatFetcher.ts  # Archived chat fetching
 │   ├── liveChatFetcher.ts  # Live chat fetching
-│   └── schemas.ts    # Zod schema definitions
+│   ├── chatItemParser.ts   # Chat item parsing shared by both fetchers
+│   └── youtubeUrl.ts       # YouTube URL handling
 ├── src/              # React sidebar UI
 │   ├── App.tsx
 │   ├── components/
-│   └── hooks/
+│   ├── hooks/
+│   └── schemas.ts    # Zod schemas (shared message types)
 └── dist/             # Build output (committed for GitHub distribution)
 ```
 
@@ -168,4 +171,4 @@ iina-plugin pack .
 
 ## License
 
-MIT License
+[MIT License](./LICENSE)

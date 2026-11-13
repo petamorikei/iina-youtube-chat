@@ -59,6 +59,8 @@ export default defineConfig({
             errorBg: { value: "rgba(239, 68, 68, 0.1)" },
             errorButton: { value: "#dc2626" },
             errorButtonHover: { value: "#b91c1c" },
+            warning: { value: "#fbbf24" },
+            warningBg: { value: "rgba(251, 191, 36, 0.12)" },
             loading: { value: "#60a5fa" },
             loadingBg: { value: "rgba(59, 130, 246, 0.1)" },
             loadingBorder: { value: "rgba(59, 130, 246, 0.2)" },

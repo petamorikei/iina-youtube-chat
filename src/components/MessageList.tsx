@@ -13,6 +13,23 @@ import type { ChatMessage as ChatMessageType, UserPreferences } from "../types";
 import { ChatMessage } from "./ChatMessage";
 import { Box } from "./ui";
 
+/**
+ * Count messages with timestamp <= position (messages must be sorted by timestamp)
+ */
+const countMessagesUpTo = (messages: ChatMessageType[], position: number): number => {
+  let low = 0;
+  let high = messages.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (messages[mid].timestamp <= position) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+};
+
 interface MessageListProps {
   messages: ChatMessageType[];
   currentPosition: number | null;
@@ -32,27 +49,23 @@ export const MessageList = ({ messages, currentPosition, preferences }: MessageL
   // Track if this is the initial load (to force scroll to latest)
   const isInitialLoadRef = useRef(true);
 
-  // Filter and limit messages based on current position and preferences
-  const displayMessages = useMemo(() => {
-    // First filter by current position
-    let filtered = messages;
-    if (currentPosition !== null) {
-      filtered = messages.filter((msg) => msg.timestamp <= currentPosition);
-    }
+  // Visible range based on current position and preferences.
+  // Messages are sorted by timestamp, so find the end of the range with binary search.
+  const end = currentPosition === null ? messages.length : countMessagesUpTo(messages, currentPosition);
+  // Apply maxMessages limit (0 = unlimited), keeping the most recent messages (last N)
+  const start = maxMessages > 0 ? Math.max(0, end - maxMessages) : 0;
 
-    // Apply maxMessages limit (0 = unlimited)
-    if (maxMessages > 0 && filtered.length > maxMessages) {
-      // Keep the most recent messages (last N)
-      filtered = filtered.slice(-maxMessages);
-    }
+  // Only rebuild the list when the visible range changes (not on every position update)
+  const displayMessages = useMemo(() => {
+    const filtered = messages.slice(start, end);
 
     // Reverse order for top-to-bottom (newest first)
     if (scrollDirection === "top-to-bottom") {
-      return [...filtered].reverse();
+      return filtered.reverse();
     }
 
     return filtered;
-  }, [messages, currentPosition, maxMessages, scrollDirection]);
+  }, [messages, start, end, scrollDirection]);
 
   // Virtual list setup
   const virtualizer = useVirtualizer({
